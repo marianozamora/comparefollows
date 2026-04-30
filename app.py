@@ -1,4 +1,5 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response
+from functools import wraps
 import json
 import re
 import threading
@@ -10,6 +11,22 @@ import requests as http
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+
+# ── Basic Auth ────────────────────────────────────────────────────────────────
+
+@app.before_request
+def _check_auth():
+    user = os.environ.get("APP_USER", "")
+    pwd  = os.environ.get("APP_PASSWORD", "")
+    if not user or not pwd:
+        return   # sin env vars → dev local, sin restricción
+    auth = request.authorization
+    if not auth or auth.username != user or auth.password != pwd:
+        return Response(
+            "Acceso no autorizado",
+            401,
+            {"WWW-Authenticate": 'Basic realm="CompareFollows"'},
+        )
 
 CACHE_FILE      = "follower_cache.json"
 SESSION_ID_FILE = "ig_sessionid"
@@ -58,6 +75,11 @@ def _fetch_profile(session: http.Session, username: str) -> dict | None:
 
 
 def _load_session_id() -> str | None:
+    # Env var tiene prioridad (Railway / producción)
+    env_sid = os.environ.get("IG_SESSIONID", "").strip()
+    if env_sid:
+        return env_sid
+    # Fallback a archivo local (dev)
     if os.path.exists(SESSION_ID_FILE):
         with open(SESSION_ID_FILE) as f:
             v = f.read().strip()
