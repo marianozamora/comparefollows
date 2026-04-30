@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, jsonify, Response
-from functools import wraps
 import json
 import re
 import threading
@@ -19,7 +18,7 @@ def _check_auth():
     user = os.environ.get("APP_USER", "")
     pwd  = os.environ.get("APP_PASSWORD", "")
     if not user or not pwd:
-        return   # sin env vars → dev local, sin restricción
+        return   # dev local sin restricción
     auth = request.authorization
     if not auth or auth.username != user or auth.password != pwd:
         return Response(
@@ -28,15 +27,15 @@ def _check_auth():
             {"WWW-Authenticate": 'Basic realm="CompareFollows"'},
         )
 
-CACHE_FILE      = "follower_cache.json"
-SESSION_ID_FILE = "ig_sessionid"
-
-_session_id = None
-_progress   = {"total": 0, "done": 0, "results": {}, "running": False,
-                "error": None, "last_error": None, "started_at": None}
-_lock       = threading.Lock()
 
 # ── Instagram API ─────────────────────────────────────────────────────────────
+
+CACHE_FILE = "follower_cache.json"
+
+_progress = {"total": 0, "done": 0, "results": {}, "running": False,
+             "error": None, "last_error": None, "started_at": None}
+_lock = threading.Lock()
+
 
 def _make_session(session_id: str) -> http.Session:
     s = http.Session()
@@ -56,7 +55,7 @@ def _make_session(session_id: str) -> http.Session:
     return s
 
 
-def _fetch_profile(session: http.Session, username: str) -> dict | None:
+def _fetch_profile(session: http.Session, username: str) -> dict:
     url  = f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}"
     resp = session.get(url, timeout=15)
     if resp.status_code == 404:
@@ -72,19 +71,6 @@ def _fetch_profile(session: http.Session, username: str) -> dict | None:
         "posts":     user.get("edge_owner_to_timeline_media", {}).get("count", 0),
         "verified":  user.get("is_verified", False),
     }
-
-
-def _load_session_id() -> str | None:
-    # Env var tiene prioridad (Railway / producción)
-    env_sid = os.environ.get("IG_SESSIONID", "").strip()
-    if env_sid:
-        return env_sid
-    # Fallback a archivo local (dev)
-    if os.path.exists(SESSION_ID_FILE):
-        with open(SESSION_ID_FILE) as f:
-            v = f.read().strip()
-            return v if v else None
-    return None
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
@@ -106,16 +92,9 @@ def _save_cache(cache: dict):
 
 # ── Background worker ─────────────────────────────────────────────────────────
 
-def _fetch_worker(usernames: list[str]):
+def _fetch_worker(usernames: list[str], session_id: str):
     global _progress
-    sid = _session_id or _load_session_id()
-    if not sid:
-        with _lock:
-            _progress["error"]   = "No hay sesión activa"
-            _progress["running"] = False
-        return
-
-    session = _make_session(sid)
+    session = _make_session(session_id)
     cache   = _load_cache()
     cutoff  = datetime.now() - timedelta(days=7)
 
@@ -249,46 +228,25 @@ def compare():
     })
 
 
-@app.route("/session-status")
-def session_status():
-    sid = _session_id or _load_session_id()
-    return jsonify({"has_session": bool(sid)})
-
-
-@app.route("/login", methods=["POST"])
-def login_route():
-    global _session_id
+@app.route("/validate-session", methods=["POST"])
+def validate_session():
+    """Valida un sessionid sin guardarlo — cada usuario gestiona el suyo."""
     data       = request.json or {}
     session_id = data.get("sessionid", "").strip()
     if not session_id:
         return jsonify({"error": "Pegá el valor del cookie sessionid"}), 400
-
-    # Validate by fetching a known public profile
     try:
-        session  = _make_session(session_id)
-        profile  = _fetch_profile(session, "instagram")
+        session = _make_session(session_id)
+        profile = _fetch_profile(session, "instagram")
         if not profile or profile.get("followers", -1) == -1:
             return jsonify({"error": "Sesión inválida o expirada"}), 401
     except http.HTTPError as e:
         code = e.response.status_code if e.response is not None else 0
         if code in (401, 403):
             return jsonify({"error": "Sesión inválida o expirada"}), 401
-        return jsonify({"error": f"Error HTTP {code} al validar la sesión"}), 500
+        return jsonify({"error": f"Error HTTP {code}"}), 500
     except Exception as e:
         return jsonify({"error": f"Error al validar: {e}"}), 500
-
-    _session_id = session_id
-    with open(SESSION_ID_FILE, "w") as f:
-        f.write(session_id)
-    return jsonify({"ok": True})
-
-
-@app.route("/logout", methods=["POST"])
-def logout_route():
-    global _session_id
-    _session_id = None
-    if os.path.exists(SESSION_ID_FILE):
-        os.remove(SESSION_ID_FILE)
     return jsonify({"ok": True})
 
 
@@ -297,19 +255,24 @@ def fetch_counts():
     global _progress
     if _progress["running"]:
         return jsonify({"error": "Ya hay un proceso en curso"}), 409
-    sid = _session_id or _load_session_id()
-    if not sid:
-        return jsonify({"error": "No hay sesión activa"}), 401
-    usernames = request.json.get("usernames", [])
+
+    data       = request.json or {}
+    session_id = data.get("sessionid", "").strip()
+    usernames  = data.get("usernames", [])
+
+    if not session_id:
+        return jsonify({"error": "Falta el sessionid"}), 401
     if not usernames:
         return jsonify({"error": "Lista vacía"}), 400
+
     with _lock:
         _progress = {
             "total": len(usernames), "done": 0, "results": {},
             "running": True, "error": None, "last_error": None,
             "started_at": datetime.now().isoformat(),
         }
-    threading.Thread(target=_fetch_worker, args=(usernames,), daemon=True).start()
+
+    threading.Thread(target=_fetch_worker, args=(usernames, session_id), daemon=True).start()
     return jsonify({"ok": True, "total": len(usernames)})
 
 
@@ -328,11 +291,11 @@ def stop_fetch():
 
 @app.route("/test-session")
 def test_session():
-    sid = _session_id or _load_session_id()
-    if not sid:
-        return jsonify({"ok": False, "error": "Sin sesión"})
+    session_id = request.args.get("sid", "").strip()
+    if not session_id:
+        return jsonify({"ok": False, "error": "Sin sessionid"})
     try:
-        session = _make_session(sid)
+        session = _make_session(session_id)
         profile = _fetch_profile(session, "instagram")
         return jsonify({"ok": True, **profile})
     except Exception as e:

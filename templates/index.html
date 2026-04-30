@@ -842,13 +842,14 @@
 
   // ── Session & fetch ───────────────────────────────────────────────────────
 
-  async function checkSession() {
-    try {
-      const res  = await fetch('/session-status');
-      const data = await res.json();
-      sessionUsername = data.has_session ? data.username : null;
-      updateSessionUI();
-    } catch (_) {}
+  function getSavedSessionId() {
+    return localStorage.getItem('cf_sessionid') || null;
+  }
+
+  function checkSession() {
+    const sid = getSavedSessionId();
+    sessionUsername = sid ? 'conectado' : null;
+    updateSessionUI();
   }
 
   function updateSessionUI() {
@@ -887,9 +888,10 @@
     errEl.style.display   = 'none';
 
     try {
-      const res  = await fetch('/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({sessionid}) });
+      const res  = await fetch('/validate-session', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({sessionid}) });
       const data = await res.json();
       if (!res.ok) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+      localStorage.setItem('cf_sessionid', sessionid);
       sessionUsername = 'conectado';
       updateSessionUI();
       closeModal();
@@ -903,8 +905,8 @@
     }
   }
 
-  async function logoutSession() {
-    await fetch('/logout', { method: 'POST' });
+  function logoutSession() {
+    localStorage.removeItem('cf_sessionid');
     sessionUsername = null;
     updateSessionUI();
   }
@@ -926,7 +928,7 @@
       const res = await fetch('/fetch-counts', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ usernames: lists.mutual })
+        body: JSON.stringify({ usernames: lists.mutual, sessionid: getSavedSessionId() })
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error); resetFetchUI(); return; }
