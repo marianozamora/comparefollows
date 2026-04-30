@@ -1,0 +1,15 @@
+# Credenciales e sesión de Instagram
+ig_sessionid
+ig_session
+ig_username
+
+# Cache de datos
+follower_cache.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/

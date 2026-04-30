@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CompareFollows</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --surface2: #222;
+      --border: #2a2a2a;
+      --accent: #6c63ff;
+      --accent2: #ff6584;
+      --text: #e8e8e8;
+      --muted: #777;
+      --green: #4caf7d;
+      --yellow: #f0c040;
+      --radius: 12px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    header { text-align: center; margin-bottom: 36px; }
+    header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.5px; }
+    header h1 span { color: var(--accent); }
+    header p { color: var(--muted); margin-top: 8px; font-size: 0.95rem; }
+
+    /* ── Upload ── */
+    .upload-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      max-width: 800px;
+      margin: 0 auto 24px;
+    }
+    @media (max-width: 560px) { .upload-grid { grid-template-columns: 1fr; } }
+
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 32px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(108,99,255,.05); }
+    .drop-zone.loaded { border-color: var(--green); background: rgba(76,175,125,.05); }
+    .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .drop-zone .icon { font-size: 2rem; margin-bottom: 8px; }
+    .drop-zone h3 { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+    .drop-zone p { font-size: .82rem; color: var(--muted); }
+    .drop-zone .multi-hint { font-size: .76rem; color: var(--accent); margin-top: 4px; }
+    .drop-zone .file-name { margin-top: 10px; font-size: .82rem; color: var(--green); font-weight: 500; word-break: break-all; }
+
+    .actions { text-align: center; margin-bottom: 32px; }
+    #compare-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 12px 32px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+    }
+    #compare-btn:hover { opacity: .9; transform: translateY(-1px); }
+    #compare-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+    .spinner {
+      display: none;
+      width: 20px; height: 20px;
+      border: 3px solid rgba(255,255,255,.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      max-width: 800px;
+      margin: 0 auto 16px;
+      background: rgba(255,101,132,.1);
+      border: 1px solid rgba(255,101,132,.3);
+      color: var(--accent2);
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: .88rem;
+      display: none;
+    }
+
+    /* ── Results ── */
+    .results { max-width: 900px; margin: 0 auto; display: none; }
+    .results.visible { display: block; }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 700px) { .summary { grid-template-columns: 1fr 1fr; } }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      text-align: center;
+    }
+    .stat-card .num { font-size: 2rem; font-weight: 700; line-height: 1; color: var(--muted); }
+    .stat-card.red  .num { color: var(--accent2); }
+    .stat-card.blue .num { color: var(--accent); }
+    .stat-card.green .num { color: var(--green); }
+    .stat-card .label { margin-top: 6px; font-size: .8rem; color: var(--muted); line-height: 1.35; }
+    .stat-card .sub { font-size: .72rem; color: var(--muted); margin-top: 3px; opacity: .7; }
+
+    .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 640px) { .results-grid { grid-template-columns: 1fr; } }
+
+    .list-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+
+    .list-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .list-header h2 { font-size: .92rem; font-weight: 600; }
+    .list-card.a .list-header h2 { color: var(--accent2); }
+    .list-card.b .list-header h2 { color: var(--accent); }
+
+    .badge { background: var(--border); padding: 2px 10px; border-radius: 99px; font-size: .78rem; font-weight: 600; }
+    .list-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+    .copy-btn, .dl-btn, .sort-btn, .fetch-btn, .stop-btn, .login-btn-sm {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: .76rem;
+      cursor: pointer;
+      transition: color .2s, border-color .2s, background .2s;
+      white-space: nowrap;
+    }
+    .copy-btn:hover, .dl-btn:hover { color: var(--text); border-color: var(--muted); }
+    .fetch-btn { color: var(--green); border-color: rgba(76,175,125,.4); }
+    .fetch-btn:hover { background: rgba(76,175,125,.1); border-color: var(--green); }
+    .stop-btn  { color: var(--accent2); border-color: rgba(255,101,132,.4); }
+    .stop-btn:hover { background: rgba(255,101,132,.1); }
+    .sort-btn  { color: var(--yellow); border-color: rgba(240,192,64,.4); }
+    .sort-btn:hover { background: rgba(240,192,64,.08); border-color: var(--yellow); }
+    .sort-btn:disabled { opacity: .35; cursor: not-allowed; }
+    .login-btn-sm { color: var(--accent); border-color: rgba(108,99,255,.4); }
+    .login-btn-sm:hover { background: rgba(108,99,255,.1); }
+
+    /* ── Fetch progress bar ── */
+    .fetch-panel {
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      display: none;
+    }
+    .fetch-panel.visible { display: block; }
+    .fetch-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: .8rem; color: var(--muted); }
+    .fetch-top .fetch-label { display: flex; align-items: center; gap: 8px; }
+    .fetch-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 1.2s ease-in-out infinite; flex-shrink: 0; }
+    .fetch-dot.done { background: var(--green); animation: none; }
+    .fetch-dot.stopped { background: var(--muted); animation: none; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .progress-track { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width .4s ease; width: 0%; }
+    .progress-fill.done { background: var(--green); }
+    .fetch-eta { font-size: .72rem; color: var(--muted); margin-top: 4px; }
+
+    /* ── Search ── */
+    .search-input {
+      width: 100%;
+      background: var(--bg);
+      border: none;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 16px;
+      font-size: .88rem;
+      outline: none;
+    }
+    .search-input::placeholder { color: var(--muted); }
+
+    /* ── List ── */
+    .list-body { max-height: 400px; overflow-y: auto; padding: 8px 0; }
+    .list-body::-webkit-scrollbar { width: 6px; }
+    .list-body::-webkit-scrollbar-track { background: transparent; }
+    .list-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .list-item {
+      padding: 7px 16px;
+      font-size: .88rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid rgba(255,255,255,.03);
+      transition: background .1s;
+    }
+    .list-item:last-child { border-bottom: none; }
+    .list-item:hover { background: rgba(255,255,255,.04); }
+    .avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .75rem; font-weight: 600;
+      flex-shrink: 0; text-transform: uppercase;
+    }
+    .list-card.a .avatar      { background: rgba(255,101,132,.2); color: var(--accent2); }
+    .list-card.b .avatar      { background: rgba(108,99,255,.2);  color: var(--accent); }
+    .list-card.mutual .avatar { background: rgba(76,175,125,.2);   color: var(--green); }
+    .list-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .list-item .name a { color: inherit; text-decoration: none; }
+    .list-item .name a:hover { text-decoration: underline; opacity: .8; }
+    /* ── Mutual table ── */
+    .mutual-sort-bar {
+      display: grid;
+      grid-template-columns: 1fr 68px 68px 58px 52px;
+      padding: 6px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      gap: 4px;
+    }
+    .sort-col {
+      font-size: .72rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      text-align: right;
+      padding: 2px 0;
+      transition: color .15s;
+      white-space: nowrap;
+    }
+    .sort-col:first-child { text-align: left; cursor: default; }
+    .sort-col:hover { color: var(--text); }
+    .sort-col.active { color: var(--yellow); }
+
+    .mutual-row {
+      display: grid;
+      grid-template-columns: 1fr 68px 68px 58px 52px;
+      gap: 4px;
+      padding: 7px 16px;
+      align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,.03);
+      transition: background .1s;
+    }
+    .mutual-row:last-child { border-bottom: none; }
+    .mutual-row:hover { background: rgba(255,255,255,.04); }
+
+    .mutual-name {
+      display: flex; align-items: center; gap: 8px;
+      min-width: 0; overflow: hidden;
+    }
+    .mutual-name a { color: var(--text); text-decoration: none; font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mutual-name a:hover { text-decoration: underline; opacity: .8; }
+    .verified-icon { color: #4cb5f9; font-size: .7rem; flex-shrink: 0; }
+
+    .mcell {
+      font-size: .78rem;
+      text-align: right;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .mcell.pending { opacity: .25; }
+    .mcell.loaded  { color: var(--text); }
+
+    .ratio-high { color: var(--green)  !important; }
+    .ratio-mid  { color: var(--yellow) !important; }
+    .ratio-low  { color: var(--accent2)!important; }
+
+    .empty-msg { padding: 32px 20px; text-align: center; color: var(--muted); font-size: .88rem; }
+
+    /* ── Misc ── */
+    .format-hint {
+      max-width: 800px;
+      margin: 0 auto 32px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      font-size: .83rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .format-hint strong { color: var(--text); }
+
+    .privacy-note {
+      max-width: 800px;
+      margin: 0 auto 16px;
+      font-size: .78rem;
+      color: var(--muted);
+      text-align: center;
+      opacity: .7;
+    }
+
+    .reset-btn {
+      display: block;
+      margin: 24px auto 0;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 8px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: .88rem;
+      transition: color .2s;
+    }
+    .reset-btn:hover { color: var(--text); }
+
+    /* ── Login modal ── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.75);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+      width: 100%;
+      max-width: 380px;
+    }
+    .modal h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
+    .modal .modal-sub { font-size: .82rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 5px; }
+    .field input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: .9rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .field input:focus { border-color: var(--accent); }
+
+    .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .btn-primary {
+      flex: 1;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px;
+      border-radius: 7px;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .2s;
+    }
+    .btn-primary:hover { opacity: .88; }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 10px 16px;
+      border-radius: 7px;
+      font-size: .9rem;
+      cursor: pointer;
+      transition: color .2s;
+    }
+    .btn-secondary:hover { color: var(--text); }
+
+    .modal-error {
+      background: rgba(255,101,132,.1);
+      border: 1px solid rgba(255,101,132,.3);
+      color: var(--accent2);
+      padding: 10px 14px;
+      border-radius: 7px;
+      font-size: .82rem;
+      margin-top: 12px;
+      display: none;
+    }
+
+    .modal-privacy {
+      font-size: .74rem;
+      color: var(--muted);
+      margin-top: 14px;
+      opacity: .65;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Compare<span>Follows</span></h1>
+  <p>Descubrí quién no te sigue de vuelta y a quién no seguís</p>
+</header>
+
+<div class="format-hint">
+  <strong>Formatos soportados:</strong>
+  HTML exportado de Instagram (<code>following.html</code>, <code>followers_1.html</code>) &nbsp;|&nbsp;
+  JSON de Instagram (<code>following.json</code>) &nbsp;|&nbsp;
+  TXT / CSV (un usuario por línea)
+</div>
+
+<div class="upload-grid">
+  <div class="drop-zone" id="zone-followers">
+    <input type="file" id="file-followers" accept=".txt,.json,.csv,.html" multiple />
+    <div class="icon">👥</div>
+    <h3>Seguidores (Followers)</h3>
+    <p>Los que te siguen a vos</p>
+    <div class="multi-hint">Podés subir varios archivos a la vez</div>
+    <div class="file-name" id="name-followers"></div>
+  </div>
+  <div class="drop-zone" id="zone-following">
+    <input type="file" id="file-following" accept=".txt,.json,.csv,.html" multiple />
+    <div class="icon">➡️</div>
+    <h3>Siguiendo (Following)</h3>
+    <p>Los que vos seguís</p>
+    <div class="multi-hint">Podés subir varios archivos a la vez</div>
+    <div class="file-name" id="name-following"></div>
+  </div>
+</div>
+
+<p class="privacy-note">El análisis de archivos ocurre en tu navegador. Ningún dato de tus listas se envía al servidor.</p>
+
+<div class="actions">
+  <button id="compare-btn" disabled>Comparar</button>
+  <div class="spinner" id="spinner"></div>
+</div>
+
+<div class="error-msg" id="error-msg"></div>
+
+<div class="results" id="results">
+  <div class="summary">
+    <div class="stat-card">
+      <div class="num" id="count-followers">0</div>
+      <div class="label">Seguidores</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" id="count-following">0</div>
+      <div class="label">Siguiendo</div>
+    </div>
+    <div class="stat-card red">
+      <div class="num" id="count-a">0</div>
+      <div class="label">No te siguen de vuelta</div>
+      <div class="sub" id="pct-a"></div>
+    </div>
+    <div class="stat-card green">
+      <div class="num" id="count-mutual">0</div>
+      <div class="label">Mutuos</div>
+      <div class="sub" id="pct-mutual"></div>
+    </div>
+  </div>
+
+  <div class="results-grid">
+
+    <!-- Lista A: no te siguen de vuelta -->
+    <div class="list-card a">
+      <div class="list-header">
+        <h2>No te siguen de vuelta</h2>
+        <div class="list-actions">
+          <span class="badge" id="badge-a">0</span>
+          <button class="copy-btn" data-list="a">Copiar</button>
+          <button class="dl-btn"   data-list="a" data-filename="no_te_siguen.txt">Descargar</button>
+        </div>
+      </div>
+      <input class="search-input" type="search" placeholder="Buscar…" data-filter="a" />
+      <div class="list-body" id="list-a"></div>
+    </div>
+
+    <!-- Lista B: no los seguís de vuelta -->
+    <div class="list-card b">
+      <div class="list-header">
+        <h2>No los seguís de vuelta</h2>
+        <div class="list-actions">
+          <span class="badge" id="badge-b">0</span>
+          <button class="copy-btn" data-list="b">Copiar</button>
+          <button class="dl-btn"   data-list="b" data-filename="no_los_seguis.txt">Descargar</button>
+        </div>
+      </div>
+      <input class="search-input" type="search" placeholder="Buscar…" data-filter="b" />
+      <div class="list-body" id="list-b"></div>
+    </div>
+
+  </div>
+
+  <!-- Lista Mutuos -->
+  <div class="list-card mutual" style="margin-top:16px">
+    <div class="list-header">
+      <h2 style="color:var(--green)">Mutuos — ¿a quiénes conviene seguir?</h2>
+      <div class="list-actions">
+        <span class="badge" id="badge-mutual">0</span>
+        <button class="sort-btn" id="sort-btn" disabled>↓ Más followers</button>
+        <button class="copy-btn" data-list="mutual">Copiar</button>
+        <button class="dl-btn"   data-list="mutual" data-filename="mutuos.txt">Descargar</button>
+      </div>
+    </div>
+
+    <!-- Fetch panel (progress) -->
+    <div class="fetch-panel" id="fetch-panel">
+      <div class="fetch-top">
+        <span class="fetch-label">
+          <span class="fetch-dot" id="fetch-dot"></span>
+          <span id="fetch-status">Iniciando…</span>
+        </span>
+        <button class="stop-btn" id="stop-btn">Detener</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="fetch-eta" id="fetch-eta"></div>
+      <div id="fetch-last-error" style="font-size:.7rem;color:var(--accent2);margin-top:4px;display:none"></div>
+    </div>
+
+    <!-- Fetch trigger -->
+    <div id="fetch-trigger" style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span style="font-size:.78rem;color:var(--muted)">Ver cuántos seguidores tiene cada mútuo para decidir a quién dejar de seguir</span>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="login-btn-sm" id="session-btn" style="display:none"></button>
+        <button class="fetch-btn" id="fetch-btn">Obtener followers</button>
+      </div>
+    </div>
+
+    <input class="search-input" type="search" id="search-mutual" placeholder="Buscar…" />
+    <div class="mutual-sort-bar" id="mutual-sort-bar" style="display:none">
+      <span class="sort-col">Usuario</span>
+      <span class="sort-col" data-sort="followers">Followers ↕</span>
+      <span class="sort-col" data-sort="following">Following ↕</span>
+      <span class="sort-col" data-sort="ratio">Ratio ↕</span>
+      <span class="sort-col" data-sort="posts">Posts ↕</span>
+    </div>
+    <div class="list-body" id="list-mutual" style="max-height:500px"></div>
+  </div>
+
+  <button class="reset-btn" id="reset-btn">Resetear y comparar otros archivos</button>
+</div>
+
+<!-- Login modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <h2>Conectar Instagram</h2>
+    <p class="modal-sub">Necesitás pegar el cookie <code>sessionid</code> de tu navegador. Solo se usa para leer datos públicos — no se almacena tu contraseña.</p>
+
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:.79rem;color:var(--muted);line-height:1.7;margin-bottom:16px">
+      <strong style="color:var(--text);display:block;margin-bottom:4px">Cómo obtener el sessionid:</strong>
+      1. Abrí <strong style="color:var(--text)">instagram.com</strong> en Chrome/Firefox y logueate<br>
+      2. Presioná <kbd style="background:var(--border);padding:1px 5px;border-radius:4px;font-size:.76rem">F12</kbd> → pestaña <strong style="color:var(--text)">Application</strong> (Chrome) o <strong style="color:var(--text)">Storage</strong> (Firefox)<br>
+      3. <strong style="color:var(--text)">Cookies</strong> → <code>https://www.instagram.com</code><br>
+      4. Buscá <code style="color:var(--green)">sessionid</code> y copiá su valor
+    </div>
+
+    <div class="field">
+      <label>Valor del cookie <code>sessionid</code></label>
+      <input type="text" id="ig-sessionid" autocomplete="off" placeholder="Pegá el valor aquí…" style="font-size:.78rem;font-family:monospace" />
+    </div>
+
+    <div class="modal-error" id="modal-error"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="modal-cancel">Cancelar</button>
+      <button class="btn-primary"   id="modal-submit">Conectar</button>
+    </div>
+    <p class="modal-privacy">El sessionid se guarda solo en tu máquina. Podés desconectarte en cualquier momento.</p>
+  </div>
+</div>
+
+<script>
+  // ── State ─────────────────────────────────────────────────────────────────
+  const fileLists = { followers: null, following: null };
+  let lists = { a: [], b: [], mutual: [] };
+  let profileData = {};   // username → {followers, following, posts, verified} | null
+  let sortState   = { key: null, dir: -1 };   // dir: -1 desc, 1 asc
+  let pollInterval     = null;
+  let sessionUsername  = null;
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  function fmtNum(n) {
+    if (n === null || n === undefined) return '—';
+    if (n < 0) return 'N/D';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1_000)     return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+    return n.toString();
+  }
+
+  function fmtRatio(followers, following) {
+    if (following == null || following === 0) return followers > 0 ? '∞' : '—';
+    const r = followers / following;
+    return r >= 10 ? r.toFixed(0) + 'x' : r.toFixed(1) + 'x';
+  }
+
+  function ratioClass(followers, following) {
+    if (!following) return following === 0 && followers > 0 ? 'ratio-high' : '';
+    const r = followers / following;
+    if (r >= 1)   return 'ratio-high';
+    if (r >= 0.3) return 'ratio-mid';
+    return 'ratio-low';
+  }
+
+  function pct(n, total) {
+    if (!total) return '';
+    return Math.round(n / total * 100) + '% del total';
+  }
+
+  function fileLabel(fl) {
+    return fl.length === 1 ? `✓ ${fl[0].name}` : `✓ ${fl.length} archivos`;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+  }
+
+  function setLoading(on) {
+    document.getElementById('compare-btn').style.display = on ? 'none' : '';
+    document.getElementById('spinner').style.display = on ? 'block' : 'none';
+  }
+
+  function downloadList(listKey, filename) {
+    const blob = new Blob([lists[listKey].join('\n')], { type: 'text/plain' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── File parser ───────────────────────────────────────────────────────────
+
+  function parseContent(text, filename) {
+    const users = new Set();
+
+    if (filename.endsWith('.html') || text.includes('instagram.com')) {
+      let m = [...text.matchAll(/instagram\.com\/_u\/([A-Za-z0-9_.]+)/g)].map(x => x[1]);
+      if (!m.length)
+        m = [...text.matchAll(/instagram\.com\/([A-Za-z0-9_.][A-Za-z0-9_.]*)["'?]/g)].map(x => x[1]);
+      if (m.length) { m.forEach(u => users.add(u.toLowerCase())); return users; }
+    }
+
+    try {
+      const data = JSON.parse(text);
+      function extract(arr) {
+        if (!Array.isArray(arr)) return;
+        for (const item of arr) {
+          if (item && typeof item === 'object') {
+            for (const e of (item.string_list_data || []))
+              if (e.value) users.add(e.value.toLowerCase());
+            if (item.value) users.add(item.value.toLowerCase());
+          }
+        }
+      }
+      if (Array.isArray(data)) { extract(data); }
+      else if (data && typeof data === 'object') {
+        if (data.relationships_following) extract(data.relationships_following);
+        else for (const v of Object.values(data)) extract(v);
+      }
+      if (users.size) return users;
+    } catch (_) {}
+
+    for (const line of text.split('\n')) {
+      const t = line.trim().replace(/^@/, '');
+      if (t && !t.startsWith('#')) users.add(t.toLowerCase());
+    }
+    return users;
+  }
+
+  async function readFileList(fl) {
+    const merged = new Set();
+    for (const f of fl) {
+      const text = await f.text();
+      parseContent(text, f.name).forEach(u => merged.add(u));
+    }
+    return merged;
+  }
+
+  // ── Compare ───────────────────────────────────────────────────────────────
+
+  async function compare() {
+    showError('');
+    setLoading(true);
+    try {
+      const followers = await readFileList(fileLists.followers);
+      const following = await readFileList(fileLists.following);
+      if (!followers.size && !following.size) {
+        showError('No se pudieron leer los archivos. Verificá el formato.');
+        return;
+      }
+      lists.a      = [...following].filter(u => !followers.has(u)).sort();
+      lists.b      = [...followers].filter(u => !following.has(u)).sort();
+      lists.mutual = [...following].filter(u =>  followers.has(u)).sort();
+
+      document.getElementById('count-followers').textContent = followers.size;
+      document.getElementById('count-following').textContent = following.size;
+      document.getElementById('count-a').textContent      = lists.a.length;
+      document.getElementById('count-mutual').textContent  = lists.mutual.length;
+      document.getElementById('badge-a').textContent      = lists.a.length;
+      document.getElementById('badge-b').textContent      = lists.b.length;
+      document.getElementById('badge-mutual').textContent  = lists.mutual.length;
+      document.getElementById('pct-a').textContent        = pct(lists.a.length, following.size);
+      document.getElementById('pct-mutual').textContent   = pct(lists.mutual.length, following.size);
+
+      profileData = {};
+      sortState   = { key: null, dir: -1 };
+      document.getElementById('sort-btn').disabled    = true;
+      document.getElementById('sort-btn').textContent = '↓ Más followers';
+      document.getElementById('mutual-sort-bar').style.display = 'none';
+
+      renderList('list-a', lists.a, false);
+      renderList('list-b', lists.b, false);
+      renderMutualList(lists.mutual);
+
+      saveState();
+
+      const resultsEl = document.getElementById('results');
+      resultsEl.classList.add('visible');
+      resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      showError('Error al procesar los archivos: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  function renderList(containerId, items) {
+    const el = document.getElementById(containerId);
+    if (!items.length) {
+      el.innerHTML = '<div class="empty-msg">¡Todo en orden! 🎉</div>';
+      return;
+    }
+    el.innerHTML = items.map(u => `
+      <div class="list-item" data-name="${u}">
+        <div class="avatar">${u.charAt(0)}</div>
+        <span class="name"><a href="https://www.instagram.com/${u}" target="_blank" rel="noopener">${u}</a></span>
+      </div>`).join('');
+  }
+
+  function renderMutualList(items) {
+    const el = document.getElementById('list-mutual');
+    if (!items.length) {
+      el.innerHTML = '<div class="empty-msg">No hay mutuos 🤔</div>';
+      return;
+    }
+    el.innerHTML = items.map(u => {
+      const p   = profileData[u];
+      const pending = !p;
+      const nd  = p && p.followers === -1;
+      const cls = pending ? 'pending' : 'loaded';
+      const verifiedHtml = p?.verified ? '<span class="verified-icon" title="Verificado">✓</span>' : '';
+      return `
+        <div class="mutual-row" data-name="${u}">
+          <div class="mutual-name">
+            <div class="avatar" style="background:rgba(76,175,125,.2);color:var(--green);width:24px;height:24px;font-size:.68rem;flex-shrink:0">${u.charAt(0)}</div>
+            <a href="https://www.instagram.com/${u}" target="_blank" rel="noopener">${u}</a>
+            ${verifiedHtml}
+          </div>
+          <span class="mcell ${cls}" id="m-fl-${u}">${pending ? '—' : nd ? 'N/D' : fmtNum(p.followers)}</span>
+          <span class="mcell ${cls}" id="m-fw-${u}">${pending ? '—' : nd ? 'N/D' : fmtNum(p.following)}</span>
+          <span class="mcell ${cls} ${pending || nd ? '' : ratioClass(p.followers, p.following)}" id="m-rt-${u}">${pending ? '—' : nd ? 'N/D' : fmtRatio(p.followers, p.following)}</span>
+          <span class="mcell ${cls}" id="m-po-${u}">${pending ? '—' : nd ? 'N/D' : fmtNum(p.posts)}</span>
+        </div>`;
+    }).join('');
+  }
+
+  function updateMutualRow(username, profile) {
+    if (!profile) return;
+    const nd = profile.followers === -1;
+    const setText = (id, val) => { const e = document.getElementById(id); if (e) { e.textContent = val; e.classList.replace('pending', 'loaded'); } };
+    setText(`m-fl-${username}`, nd ? 'N/D' : fmtNum(profile.followers));
+    setText(`m-fw-${username}`, nd ? 'N/D' : fmtNum(profile.following));
+    const rtEl = document.getElementById(`m-rt-${username}`);
+    if (rtEl) {
+      rtEl.textContent = nd ? 'N/D' : fmtRatio(profile.followers, profile.following);
+      rtEl.classList.replace('pending', 'loaded');
+      if (!nd) rtEl.classList.add(ratioClass(profile.followers, profile.following));
+    }
+    setText(`m-po-${username}`, nd ? 'N/D' : fmtNum(profile.posts));
+    if (profile.verified) {
+      const nameEl = document.querySelector(`[data-name="${username}"] .mutual-name`);
+      if (nameEl && !nameEl.querySelector('.verified-icon')) {
+        nameEl.insertAdjacentHTML('beforeend', '<span class="verified-icon" title="Verificado">✓</span>');
+      }
+    }
+  }
+
+  function sortMutualBy(key) {
+    if (sortState.key === key) {
+      sortState.dir *= -1;
+    } else {
+      sortState.key = key;
+      sortState.dir = -1; // default desc
+    }
+
+    // Update header indicators
+    document.querySelectorAll('.sort-col[data-sort]').forEach(el => {
+      const k   = el.dataset.sort;
+      const arr = sortState.key === k ? (sortState.dir === -1 ? ' ↓' : ' ↑') : ' ↕';
+      el.textContent = { followers: 'Followers', following: 'Following', ratio: 'Ratio', posts: 'Posts' }[k] + arr;
+      el.classList.toggle('active', k === sortState.key);
+    });
+
+    const val = (u) => {
+      const p = profileData[u];
+      if (!p || p.followers === -1) return -Infinity;
+      if (key === 'ratio') return p.following > 0 ? p.followers / p.following : Infinity;
+      return p[key] ?? 0;
+    };
+
+    const sorted = [...lists.mutual].sort((a, b) => (val(b) - val(a)) * sortState.dir * -1);
+    renderMutualList(sorted);
+
+    // Restore search filter
+    const q = document.getElementById('search-mutual').value.toLowerCase();
+    if (q) document.getElementById('list-mutual').querySelectorAll('.mutual-row')
+      .forEach(row => row.style.display = row.dataset.name.includes(q) ? '' : 'none');
+  }
+
+  // Legacy sort button (now delegates to sortMutualBy)
+  function sortMutual() { sortMutualBy('followers'); }
+
+  // ── Session & fetch ───────────────────────────────────────────────────────
+
+  async function checkSession() {
+    try {
+      const res  = await fetch('/session-status');
+      const data = await res.json();
+      sessionUsername = data.has_session ? data.username : null;
+      updateSessionUI();
+    } catch (_) {}
+  }
+
+  function updateSessionUI() {
+    const btn = document.getElementById('session-btn');
+    if (sessionUsername) {
+      btn.style.display = '';
+      btn.textContent   = 'Instagram: conectado';
+    } else {
+      btn.style.display = 'none';
+    }
+  }
+
+  function openModal() {
+    document.getElementById('modal-overlay').classList.add('open');
+    document.getElementById('ig-sessionid').focus();
+    document.getElementById('modal-error').style.display = 'none';
+    document.getElementById('ig-sessionid').value = '';
+    const submitBtn = document.getElementById('modal-submit');
+    submitBtn.textContent = 'Conectar';
+    submitBtn.disabled    = false;
+    submitBtn.onclick     = submitLogin;
+  }
+
+  function closeModal() {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+
+  async function submitLogin() {
+    const sessionid = document.getElementById('ig-sessionid').value.trim();
+    const errEl     = document.getElementById('modal-error');
+    const submitBtn = document.getElementById('modal-submit');
+    if (!sessionid) { errEl.textContent = 'Pegá el valor del sessionid.'; errEl.style.display = 'block'; return; }
+
+    submitBtn.disabled    = true;
+    submitBtn.textContent = 'Validando…';
+    errEl.style.display   = 'none';
+
+    try {
+      const res  = await fetch('/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({sessionid}) });
+      const data = await res.json();
+      if (!res.ok) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+      sessionUsername = 'conectado';
+      updateSessionUI();
+      closeModal();
+      startFetch();
+    } catch (e) {
+      errEl.textContent = 'Error de conexión con el servidor.';
+      errEl.style.display = 'block';
+    } finally {
+      submitBtn.disabled    = false;
+      submitBtn.textContent = 'Conectar';
+    }
+  }
+
+  async function logoutSession() {
+    await fetch('/logout', { method: 'POST' });
+    sessionUsername = null;
+    updateSessionUI();
+  }
+
+  async function startFetch() {
+    if (!lists.mutual.length) return;
+
+    if (!sessionUsername) { openModal(); return; }
+
+    document.getElementById('fetch-trigger').style.display = 'none';
+    document.getElementById('fetch-panel').classList.add('visible');
+    document.getElementById('fetch-dot').className = 'fetch-dot';
+    document.getElementById('progress-fill').style.width = '0%';
+    document.getElementById('fetch-status').textContent = 'Iniciando…';
+    document.getElementById('fetch-eta').textContent = '';
+    document.getElementById('stop-btn').disabled = false;
+
+    try {
+      const res = await fetch('/fetch-counts', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ usernames: lists.mutual })
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error); resetFetchUI(); return; }
+      pollInterval = setInterval(pollProgress, 2000);
+    } catch (e) {
+      alert('Error al iniciar el proceso: ' + e.message);
+      resetFetchUI();
+    }
+  }
+
+  async function stopFetch() {
+    await fetch('/stop-fetch', { method: 'POST' });
+    clearInterval(pollInterval); pollInterval = null;
+    document.getElementById('fetch-dot').className = 'fetch-dot stopped';
+    document.getElementById('fetch-eta').textContent = 'Proceso detenido.';
+    document.getElementById('stop-btn').disabled = true;
+  }
+
+  function resetFetchUI() {
+    document.getElementById('fetch-panel').classList.remove('visible');
+    document.getElementById('fetch-trigger').style.display = '';
+  }
+
+  async function pollProgress() {
+    try {
+      const res  = await fetch('/fetch-progress');
+      const data = await res.json();
+
+      // Apply new results to mutual rows
+      let changed = false;
+      for (const [u, profile] of Object.entries(data.results)) {
+        if (!(u in profileData)) {
+          profileData[u] = profile;
+          updateMutualRow(u, profile);
+          changed = true;
+        }
+      }
+      if (changed) saveState();
+
+      const pctDone = data.total ? Math.round(data.done / data.total * 100) : 0;
+      document.getElementById('progress-fill').style.width = pctDone + '%';
+      document.getElementById('fetch-status').textContent = `${data.done} / ${data.total} usuarios`;
+
+      // ETA
+      if (data.running && data.done > 0 && data.started_at) {
+        const elapsed  = (Date.now() - new Date(data.started_at)) / 1000;
+        const rate     = data.done / elapsed;
+        const remaining = Math.round((data.total - data.done) / rate);
+        const mins = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+        document.getElementById('fetch-eta').textContent =
+          remaining > 0 ? `~${mins > 0 ? mins + ' min ' : ''}${secs} seg restantes` : '';
+      }
+
+      // Show last error detail
+      const errDiv = document.getElementById('fetch-last-error');
+      if (data.last_error) {
+        errDiv.textContent = `Último error: ${data.last_error}`;
+        errDiv.style.display = 'block';
+      }
+
+      if (!data.running) {
+        clearInterval(pollInterval); pollInterval = null;
+        document.getElementById('fetch-dot').className = 'fetch-dot done';
+        document.getElementById('fetch-eta').textContent = data.error
+          ? `Error: ${data.error}`
+          : `Completado — ${Object.keys(data.results).length} cuentas procesadas`;
+        document.getElementById('stop-btn').disabled = true;
+        document.getElementById('sort-btn').disabled = false;
+        document.getElementById('mutual-sort-bar').style.display = '';
+        // Auto-sort by ratio desc once done
+        sortMutualBy('ratio');
+      }
+
+      if (data.error) {
+        clearInterval(pollInterval); pollInterval = null;
+      }
+    } catch (_) {}
+  }
+
+  // ── Drop zones ────────────────────────────────────────────────────────────
+
+  function loadZone(key) {
+    const input = document.getElementById(`file-${key}`);
+    const zone  = document.getElementById(`zone-${key}`);
+
+    function handleFiles(fl) {
+      if (!fl || !fl.length) return;
+      fileLists[key] = fl;
+      document.getElementById(`name-${key}`).textContent = fileLabel(fl);
+      zone.classList.add('loaded');
+      document.getElementById('compare-btn').disabled = !(fileLists.followers && fileLists.following);
+    }
+
+    input.addEventListener('change', e => handleFiles(e.target.files));
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+  }
+
+  loadZone('followers');
+  loadZone('following');
+
+  // ── Event listeners ───────────────────────────────────────────────────────
+
+  document.getElementById('compare-btn').addEventListener('click', compare);
+
+  document.getElementById('fetch-btn').addEventListener('click', startFetch);
+  document.getElementById('stop-btn').addEventListener('click', stopFetch);
+  document.getElementById('sort-btn').addEventListener('click', sortMutual);
+
+  document.getElementById('session-btn').addEventListener('click', () => {
+    if (confirm(`¿Cerrar sesión de ${sessionUsername}?`)) logoutSession();
+  });
+
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('modal-submit').addEventListener('click', submitLogin);
+  document.getElementById('modal-overlay').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Enter' && document.getElementById('modal-overlay').classList.contains('open')) submitLogin();
+  });
+
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    fileLists.followers = fileLists.following = null;
+    ['followers', 'following'].forEach(k => {
+      document.getElementById(`file-${k}`).value = '';
+      document.getElementById(`name-${k}`).textContent = '';
+      document.getElementById(`zone-${k}`).classList.remove('loaded');
+    });
+    document.getElementById('compare-btn').disabled = true;
+    document.getElementById('results').classList.remove('visible');
+    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    resetFetchUI();
+    document.getElementById('stop-btn').disabled = false;
+    showError('');
+    clearState();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  // Search for list-a and list-b
+  document.querySelectorAll('.search-input[data-filter]').forEach(input => {
+    input.addEventListener('input', () => {
+      const q = input.value.toLowerCase();
+      document.getElementById(`list-${input.dataset.filter}`)
+        .querySelectorAll('.list-item')
+        .forEach(item => item.style.display = item.dataset.name.includes(q) ? '' : 'none');
+    });
+  });
+
+  // Search for mutuals
+  document.getElementById('search-mutual').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    document.getElementById('list-mutual').querySelectorAll('.mutual-row')
+      .forEach(row => row.style.display = row.dataset.name.includes(q) ? '' : 'none');
+  });
+
+  // Column sort headers
+  document.querySelectorAll('.sort-col[data-sort]').forEach(el => {
+    el.addEventListener('click', () => sortMutualBy(el.dataset.sort));
+  });
+
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(lists[btn.dataset.list].join('\n')).then(() => {
+        btn.textContent = '¡Copiado!';
+        setTimeout(() => btn.textContent = 'Copiar', 2000);
+      });
+    });
+  });
+
+  document.querySelectorAll('.dl-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key  = btn.dataset.list;
+      const blob = new Blob([lists[key].join('\n')], { type: 'text/plain' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = btn.dataset.filename; a.click();
+      URL.revokeObjectURL(url);
+    });
+  });
+
+  // ── LocalStorage persistence ──────────────────────────────────────────────
+
+  function saveState() {
+    try {
+      localStorage.setItem('cf_lists',       JSON.stringify(lists));
+      localStorage.setItem('cf_profile',     JSON.stringify(profileData));
+      localStorage.setItem('cf_stats',       JSON.stringify({
+        followers: document.getElementById('count-followers').textContent,
+        following: document.getElementById('count-following').textContent,
+        countA:    lists.a.length,
+        countB:    lists.b.length,
+        mutual:    lists.mutual.length,
+        pctA:      document.getElementById('pct-a').textContent,
+        pctMutual: document.getElementById('pct-mutual').textContent,
+      }));
+    } catch (_) {}
+  }
+
+  function loadState() {
+    try {
+      const savedLists   = localStorage.getItem('cf_lists');
+      const savedProfile = localStorage.getItem('cf_profile');
+      const savedStats   = localStorage.getItem('cf_stats');
+      if (!savedLists) return;
+
+      lists       = JSON.parse(savedLists);
+      profileData = savedProfile ? JSON.parse(savedProfile) : {};
+
+      if (savedStats) {
+        const s = JSON.parse(savedStats);
+        document.getElementById('count-followers').textContent = s.followers;
+        document.getElementById('count-following').textContent = s.following;
+        document.getElementById('count-a').textContent      = s.countA;
+        document.getElementById('count-mutual').textContent  = s.mutual;
+        document.getElementById('badge-a').textContent      = s.countA;
+        document.getElementById('badge-b').textContent      = s.countB;
+        document.getElementById('badge-mutual').textContent  = s.mutual;
+        document.getElementById('pct-a').textContent        = s.pctA;
+        document.getElementById('pct-mutual').textContent   = s.pctMutual;
+      }
+
+      renderList('list-a', lists.a, false);
+      renderList('list-b', lists.b, false);
+      renderMutualList(lists.mutual);
+
+      const hasCounts = Object.keys(profileData).length > 0;
+      if (hasCounts) {
+        document.getElementById('mutual-sort-bar').style.display = '';
+        document.getElementById('sort-btn').disabled = false;
+        sortMutualBy('ratio');
+      }
+
+      document.getElementById('results').classList.add('visible');
+    } catch (_) {}
+  }
+
+  function clearState() {
+    localStorage.removeItem('cf_lists');
+    localStorage.removeItem('cf_profile');
+    localStorage.removeItem('cf_stats');
+  }
+
+  // Check session on load
+  checkSession();
+  loadState();
+</script>
+</body>
+</html>
