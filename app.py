@@ -5,11 +5,49 @@ import threading
 import os
 import time
 import random
+import hmac
+import uuid
+import sqlite3
+import functools
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 import requests as http
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+
+IS_PROD = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("REQUIRE_AUTH") == "1")
+
+if IS_PROD:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)   # IP real detrás del proxy de Railway
+    if not (os.environ.get("APP_USER") and os.environ.get("APP_PASSWORD")):
+        raise RuntimeError("APP_USER y APP_PASSWORD son obligatorios en producción")
+
+
+# ── Rate limit (en memoria, por IP) ───────────────────────────────────────────
+
+_hits: dict[tuple, deque] = defaultdict(deque)
+_hits_lock = threading.Lock()
+
+
+def rate_limit(max_calls: int, per_seconds: int = 60):
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            key = (fn.__name__, request.remote_addr)
+            now = time.monotonic()
+            with _hits_lock:
+                q = _hits[key]
+                while q and now - q[0] > per_seconds:
+                    q.popleft()
+                if len(q) >= max_calls:
+                    return jsonify({"error": "Demasiadas solicitudes, esperá un momento"}), 429
+                q.append(now)
+            return fn(*args, **kwargs)
+        return wrapper
+    return deco
+
 
 # ── Basic Auth ────────────────────────────────────────────────────────────────
 
@@ -20,7 +58,9 @@ def _check_auth():
     if not user or not pwd:
         return   # dev local sin restricción
     auth = request.authorization
-    if not auth or auth.username != user or auth.password != pwd:
+    if (not auth
+            or not hmac.compare_digest(auth.username.encode(), user.encode())
+            or not hmac.compare_digest((auth.password or "").encode(), pwd.encode())):
         return Response(
             "Acceso no autorizado",
             401,
@@ -30,11 +70,23 @@ def _check_auth():
 
 # ── Instagram API ─────────────────────────────────────────────────────────────
 
-CACHE_FILE = "follower_cache.json"
+CACHE_FILE = "follower_cache.json"   # formato viejo, solo se importa una vez
+CACHE_DB   = os.environ.get("CACHE_DB", "follower_cache.db")
+CACHE_TTL  = timedelta(days=7)
 
-_progress = {"total": 0, "done": 0, "results": {}, "running": False,
-             "error": None, "last_error": None, "started_at": None}
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_.]{1,30}$")
+MAX_JOBS = 20   # jobs terminados que se conservan en memoria
+
+# Un job por usuario/sesión: job_id -> estado
+_jobs: dict[str, dict] = {}
 _lock = threading.Lock()
+
+
+def _prune_jobs():
+    """Descarta los jobs terminados más viejos (llamar con _lock tomado)."""
+    finished = [k for k, j in _jobs.items() if not j["running"]]
+    for k in finished[:max(0, len(_jobs) - MAX_JOBS)]:
+        del _jobs[k]
 
 
 def _make_session(session_id: str) -> http.Session:
@@ -56,8 +108,10 @@ def _make_session(session_id: str) -> http.Session:
 
 
 def _fetch_profile(session: http.Session, username: str) -> dict:
-    url  = f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}"
-    resp = session.get(url, timeout=15)
+    resp = session.get(
+        "https://i.instagram.com/api/v1/users/web_profile_info/",
+        params={"username": username}, timeout=15,
+    )
     if resp.status_code == 404:
         return {"followers": -1, "following": 0, "posts": 0, "verified": False}
     resp.raise_for_status()
@@ -73,86 +127,142 @@ def _fetch_profile(session: http.Session, username: str) -> dict:
     }
 
 
-# ── Cache ─────────────────────────────────────────────────────────────────────
+# ── Cache (SQLite) ────────────────────────────────────────────────────────────
 
-def _load_cache() -> dict:
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+def _db() -> sqlite3.Connection:
+    conn = sqlite3.connect(CACHE_DB, timeout=10)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS profiles ("
+        " username TEXT PRIMARY KEY, followers INTEGER, following INTEGER,"
+        " posts INTEGER, verified INTEGER, fetched_at TEXT NOT NULL)"
+    )
+    return conn
 
 
-def _save_cache(cache: dict):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f, indent=2)
+def _import_legacy_cache():
+    """Migra follower_cache.json a SQLite la primera vez (tabla vacía)."""
+    if not os.path.exists(CACHE_FILE):
+        return
+    try:
+        with open(CACHE_FILE) as f:
+            old = json.load(f)
+        with _db() as conn:
+            if conn.execute("SELECT 1 FROM profiles LIMIT 1").fetchone():
+                return
+            conn.executemany(
+                "INSERT OR IGNORE INTO profiles VALUES (?,?,?,?,?,?)",
+                [(u, d.get("followers"), d.get("following"), d.get("posts", 0),
+                  int(bool(d.get("verified"))), d.get("fetched_at", ""))
+                 for u, d in old.items() if d.get("fetched_at")],
+            )
+    except (OSError, ValueError, AttributeError):
+        app.logger.warning("No se pudo importar %s", CACHE_FILE, exc_info=True)
+
+
+def _cache_get(username: str) -> dict | None:
+    """Devuelve el perfil cacheado si es reciente, o None."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT followers, following, posts, verified, fetched_at"
+            " FROM profiles WHERE username=?", (username,)
+        ).fetchone()
+    if not row or row[0] is None or row[1] is None:
+        return None
+    try:
+        if datetime.fromisoformat(row[4]) <= datetime.now() - CACHE_TTL:
+            return None
+    except ValueError:
+        return None
+    return {"followers": row[0], "following": row[1], "posts": row[2], "verified": bool(row[3])}
+
+
+def _cache_put(username: str, profile: dict):
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO profiles VALUES (?,?,?,?,?,?)",
+            (username, profile["followers"], profile["following"], profile["posts"],
+             int(profile["verified"]), datetime.now().isoformat()),
+        )
+
+
+try:
+    _import_legacy_cache()
+except sqlite3.Error:
+    app.logger.warning("Cache SQLite no disponible", exc_info=True)
 
 
 # ── Background worker ─────────────────────────────────────────────────────────
 
-def _fetch_worker(usernames: list[str], session_id: str):
-    global _progress
-    session = _make_session(session_id)
-    cache   = _load_cache()
-    cutoff  = datetime.now() - timedelta(days=7)
+def _sleep(job: dict, seconds: float):
+    """Sleep interrumpible: corta apenas el job se detiene."""
+    end = time.monotonic() + seconds
+    while job["running"] and time.monotonic() < end:
+        time.sleep(min(1, max(0, end - time.monotonic())))
+
+
+def _fetch_worker(job: dict, usernames: list[str], session_id: str):
+    session   = _make_session(session_id)
+    throttled = 0   # 429 consecutivos → backoff exponencial
 
     for username in usernames:
-        if not _progress["running"]:
+        if not job["running"]:
             break
 
-        # Serve from cache if fresh
-        cached = cache.get(username)
-        if cached and cached.get("followers") is not None and cached.get("following") is not None:
-            try:
-                if datetime.fromisoformat(cached["fetched_at"]) > cutoff:
-                    profile = {k: cached[k] for k in ("followers", "following", "posts", "verified") if k in cached}
-                    with _lock:
-                        _progress["results"][username] = profile
-                        _progress["done"] += 1
-                    continue
-            except Exception:
-                pass
+        try:
+            profile = _cache_get(username)
+        except sqlite3.Error:
+            profile = None
+        if profile:
+            with _lock:
+                job["results"][username] = profile
+                job["done"] += 1
+            continue
 
         last_error = None
         fetched    = False
         for attempt in range(3):
+            if not job["running"]:
+                break
             try:
                 profile = _fetch_profile(session, username)
-                cache[username] = {**profile, "fetched_at": datetime.now().isoformat()}
-                _save_cache(cache)
+                try:
+                    _cache_put(username, profile)
+                except sqlite3.Error:
+                    app.logger.warning("No se pudo guardar en caché", exc_info=True)
                 with _lock:
-                    _progress["results"][username] = profile
-                    _progress["done"] += 1
-                fetched = True
+                    job["results"][username] = profile
+                    job["done"] += 1
+                fetched   = True
+                throttled = 0
                 break
             except http.HTTPError as e:
                 code = e.response.status_code if e.response is not None else 0
                 if code == 429:
-                    last_error = "Rate limit (429) — esperando…"
+                    wait = min(30 * 2 ** throttled, 480) * random.uniform(1, 1.3)
+                    throttled += 1
+                    last_error = f"Rate limit (429) — esperando {int(wait)}s…"
                     with _lock:
-                        _progress["last_error"] = last_error
-                    time.sleep(random.uniform(30, 60))
+                        job["last_error"] = last_error
+                    _sleep(job, wait)
                 else:
                     last_error = f"HTTP {code}"
                     if attempt < 2:
-                        time.sleep(random.uniform(8, 15))
+                        _sleep(job, random.uniform(8, 15))
             except Exception as e:
                 last_error = f"{type(e).__name__}: {e}"
                 if attempt < 2:
-                    time.sleep(random.uniform(8, 15))
+                    _sleep(job, random.uniform(8, 15))
 
-        if not fetched:
+        if not fetched and job["running"]:
             with _lock:
-                _progress["results"][username] = None
-                _progress["done"] += 1
-                _progress["last_error"] = last_error
+                job["results"][username] = None
+                job["done"] += 1
+                job["last_error"] = last_error
 
-        time.sleep(random.uniform(3, 7))
+        _sleep(job, random.uniform(3, 7))
 
     with _lock:
-        _progress["running"] = False
+        job["running"] = False
 
 
 # ── File parser ───────────────────────────────────────────────────────────────
@@ -211,6 +321,7 @@ def index():
 
 
 @app.route("/compare", methods=["POST"])
+@rate_limit(30)
 def compare():
     if "followers" not in request.files or "following" not in request.files:
         return jsonify({"error": "Faltan archivos"}), 400
@@ -229,6 +340,7 @@ def compare():
 
 
 @app.route("/validate-session", methods=["POST"])
+@rate_limit(10)
 def validate_session():
     """Valida un sessionid sin guardarlo — cada usuario gestiona el suyo."""
     data       = request.json or {}
@@ -251,56 +363,54 @@ def validate_session():
 
 
 @app.route("/fetch-counts", methods=["POST"])
+@rate_limit(5)
 def fetch_counts():
-    global _progress
-    if _progress["running"]:
-        return jsonify({"error": "Ya hay un proceso en curso"}), 409
-
     data       = request.json or {}
     session_id = data.get("sessionid", "").strip()
     usernames  = data.get("usernames", [])
 
     if not session_id:
         return jsonify({"error": "Falta el sessionid"}), 401
-    if not usernames:
+    if not isinstance(usernames, list) or not usernames:
         return jsonify({"error": "Lista vacía"}), 400
+    usernames = [u for u in dict.fromkeys(usernames)
+                 if isinstance(u, str) and USERNAME_RE.match(u)]
+    if not usernames:
+        return jsonify({"error": "Ningún usuario válido"}), 400
 
+    job_id = uuid.uuid4().hex
+    job = {
+        "total": len(usernames), "done": 0, "results": {},
+        "running": True, "error": None, "last_error": None,
+        "started_at": datetime.now().isoformat(),
+    }
     with _lock:
-        _progress = {
-            "total": len(usernames), "done": 0, "results": {},
-            "running": True, "error": None, "last_error": None,
-            "started_at": datetime.now().isoformat(),
-        }
+        _prune_jobs()
+        _jobs[job_id] = job
 
-    threading.Thread(target=_fetch_worker, args=(usernames, session_id), daemon=True).start()
-    return jsonify({"ok": True, "total": len(usernames)})
+    threading.Thread(target=_fetch_worker, args=(job, usernames, session_id), daemon=True).start()
+    return jsonify({"ok": True, "total": len(usernames), "job_id": job_id})
 
 
 @app.route("/fetch-progress")
 def fetch_progress_route():
     with _lock:
-        return jsonify(_progress)
+        job = _jobs.get(request.args.get("job_id", ""))
+        if job is None:
+            return jsonify({"error": "Job no encontrado"}), 404
+        return jsonify(job)
 
 
 @app.route("/stop-fetch", methods=["POST"])
 def stop_fetch():
+    job_id = (request.json or {}).get("job_id", "")
     with _lock:
-        _progress["running"] = False
+        job = _jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "Job no encontrado"}), 404
+        job["running"] = False
     return jsonify({"ok": True})
 
 
-@app.route("/test-session")
-def test_session():
-    session_id = request.args.get("sid", "").strip()
-    if not session_id:
-        return jsonify({"ok": False, "error": "Sin sessionid"})
-    try:
-        session = _make_session(session_id)
-        profile = _fetch_profile(session, "instagram")
-        return jsonify({"ok": True, **profile})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)})
-
-
 if __name__ == "__main__":
-    app.run(debug=True, port=5001, threaded=True)
+    app.run(debug=os.environ.get("FLASK_DEBUG") == "1", port=5001, threaded=True)

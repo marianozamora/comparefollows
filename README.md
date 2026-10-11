@@ -10,7 +10,7 @@ Herramienta local para analizar tus seguidores de Instagram. Compara tus listas 
 - **Mutuos** con follower count, following count, ratio y cantidad de posts
 - **Ordenar** por cualquier columna (ratio, followers, posts…)
 - **Buscar** dentro de cada lista
-- **Copiar / descargar** cada lista como `.txt`
+- **Copiar / descargar** cada lista como `.txt` o `.csv` (con métricas de los mutuos)
 - **Autoguardado** en `localStorage` — los resultados persisten al recargar
 - Soporte para **múltiples archivos** (Instagram divide los followers en varios archivos)
 - Todo el procesamiento de archivos ocurre en el navegador — ningún dato de tus listas se envía al servidor
@@ -50,7 +50,7 @@ Para ver followers, following, ratio y posts de cada mútuo necesitás el cookie
 3. Copiá el valor de `sessionid`
 4. En la app, hacé click en **Obtener followers** y pegá el valor
 
-Los datos se cachean localmente por 7 días (`follower_cache.json`).
+Los datos se cachean localmente por 7 días (`follower_cache.db`, SQLite).
 
 ### Interpretar el ratio
 
@@ -73,6 +73,14 @@ Los datos se cachean localmente por 7 días (`follower_cache.json`).
 | Archivo | Contenido |
 |---------|-----------|
 | `ig_sessionid` | Cookie de sesión de Instagram |
-| `follower_cache.json` | Cache de métricas (7 días de TTL) |
+| `follower_cache.db` | Cache SQLite de métricas (7 días de TTL; importa el viejo `follower_cache.json` si existe) |
 
 Ambos están en `.gitignore` — no se suben al repositorio.
+
+## Producción y tests
+
+- En Railway (`RAILWAY_ENVIRONMENT`) o con `REQUIRE_AUTH=1`, la app **no arranca** sin `APP_USER` y `APP_PASSWORD`.
+- Hay rate limit por IP en `/compare`, `/validate-session` y `/fetch-counts`.
+- Usar un solo worker de gunicorn: el progreso de los jobs vive en memoria.
+- Ante un 429 de Instagram se aplica backoff exponencial (30 s → 8 min).
+- Tests: `pip install pytest && pytest`

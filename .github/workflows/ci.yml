@@ -19,13 +19,16 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt ruff
+        run: pip install -r requirements.txt ruff pytest
 
       - name: Lint (ruff)
-        run: ruff check app.py
+        run: ruff check app.py tests
 
       - name: Import check
         run: python -c "from app import app; print('OK')"
+
+      - name: Tests (pytest)
+        run: pytest -q
 
   security:
     name: Security check
