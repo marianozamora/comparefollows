@@ -83,6 +83,8 @@ Ambos están en `.gitignore` — no se suben al repositorio.
 
 - En Railway (`RAILWAY_ENVIRONMENT`) o con `REQUIRE_AUTH=1`, la app **no arranca** sin `APP_USER` y `APP_PASSWORD`.
 - **Caché persistente:** montá un volumen en Railway; la app usa `$RAILWAY_VOLUME_MOUNT_PATH/follower_cache.db` automáticamente (o definí `CACHE_DB`). Sin volumen, la caché se pierde en cada deploy.
+- `GET /healthz` responde sin autenticación (usalo como healthcheck en Railway).
+- Se envían cabeceras de seguridad (CSP, `X-Frame-Options`, etc.) y los perfiles vencidos de la caché se purgan al arrancar.
 - Hay rate limit por IP en `/validate-session` y `/fetch-counts`.
 - Usar un solo worker de gunicorn: el progreso de los jobs vive en memoria.
 - Ante un 429 de Instagram se aplica backoff exponencial (30 s → 8 min).

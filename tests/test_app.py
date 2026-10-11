@@ -81,3 +81,17 @@ def test_prod_requires_credentials(monkeypatch):
         importlib.reload(appmod)
     monkeypatch.delenv("REQUIRE_AUTH")
     importlib.reload(appmod)
+
+
+def test_security_headers(client):
+    r = client.get("/")
+    assert "script-src 'self'" in r.headers["Content-Security-Policy"]
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "DENY"
+
+
+def test_healthz_skips_auth(client, monkeypatch):
+    monkeypatch.setenv("APP_USER", "u")
+    monkeypatch.setenv("APP_PASSWORD", "p")
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/").status_code == 401

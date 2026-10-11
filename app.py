@@ -1,6 +1,7 @@
 import hmac
 import logging
 import os
+import sqlite3
 
 import requests as http
 from flask import Flask, Response, jsonify, render_template, request
@@ -24,12 +25,33 @@ if IS_PROD:
         raise RuntimeError("APP_USER y APP_PASSWORD son obligatorios en producción")
 
 cache.import_legacy()
+try:
+    cache.purge_old()
+except sqlite3.Error:
+    app.logger.warning("No se pudo purgar la caché", exc_info=True)
+
+CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
+    "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+)
+
+
+@app.after_request
+def _security_headers(resp):
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    return resp
 
 
 # ── Basic Auth ────────────────────────────────────────────────────────────────
 
 @app.before_request
 def _check_auth():
+    if request.path == "/healthz":
+        return   # healthcheck de la plataforma, sin credenciales
     user = os.environ.get("APP_USER", "")
     pwd  = os.environ.get("APP_PASSWORD", "")
     if not user or not pwd:
@@ -46,6 +68,11 @@ def _check_auth():
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.route("/healthz")
+def healthz():
+    return jsonify({"ok": True})
+
 
 @app.route("/")
 def index():

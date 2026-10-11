@@ -36,3 +36,16 @@ def test_default_path_uses_railway_volume(monkeypatch):
     assert cache._default_path() == "/data/follower_cache.db"
     monkeypatch.delenv("RAILWAY_VOLUME_MOUNT_PATH")
     assert cache._default_path() == "follower_cache.db"
+
+
+def test_purge_old_removes_only_expired():
+    prof = {"followers": 1, "following": 1, "posts": 1, "verified": False}
+    cache.put("fresh", prof)
+    cache.put("stale", prof)
+    old = (datetime.now() - timedelta(days=30)).isoformat()
+    with cache._db() as conn:
+        conn.execute("UPDATE profiles SET fetched_at=? WHERE username='stale'", (old,))
+    assert cache.purge_old() == 1
+    assert cache.get("fresh") == prof
+    with cache._db() as conn:
+        assert conn.execute("SELECT username FROM profiles").fetchall() == [("fresh",)]

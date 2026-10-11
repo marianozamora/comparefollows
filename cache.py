@@ -75,3 +75,13 @@ def put(username: str, profile: dict):
             (username, profile["followers"], profile["following"], profile["posts"],
              int(profile["verified"]), datetime.now().isoformat()),
         )
+
+
+def purge_old() -> int:
+    """Borra perfiles vencidos (el TTL solo se aplica al leer). Devuelve cuántos."""
+    cutoff = (datetime.now() - TTL).isoformat()
+    with _db() as conn:
+        n = conn.execute("DELETE FROM profiles WHERE fetched_at < ?", (cutoff,)).rowcount
+    if n:
+        log.info("Caché: %d perfiles vencidos eliminados", n)
+    return n
