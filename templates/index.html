@@ -8,6 +8,7 @@
 </head>
 <body>
 
+<main>
 <header>
   <h1>Compare<span>Follows</span></h1>
   <p>Descubrí quién no te sigue de vuelta y a quién no seguís</p>
@@ -22,7 +23,7 @@
 
 <div class="upload-grid">
   <div class="drop-zone" id="zone-followers">
-    <input type="file" id="file-followers" accept=".txt,.json,.csv,.html" multiple />
+    <input type="file" id="file-followers" aria-label="Archivos de seguidores" accept=".txt,.json,.csv,.html" multiple />
     <div class="icon">👥</div>
     <h3>Seguidores (Followers)</h3>
     <p>Los que te siguen a vos</p>
@@ -30,7 +31,7 @@
     <div class="file-name" id="name-followers"></div>
   </div>
   <div class="drop-zone" id="zone-following">
-    <input type="file" id="file-following" accept=".txt,.json,.csv,.html" multiple />
+    <input type="file" id="file-following" aria-label="Archivos de siguiendo" accept=".txt,.json,.csv,.html" multiple />
     <div class="icon">➡️</div>
     <h3>Siguiendo (Following)</h3>
     <p>Los que vos seguís</p>
@@ -39,14 +40,14 @@
   </div>
 </div>
 
-<p class="privacy-note">El análisis de archivos ocurre en tu navegador. Ningún dato de tus listas se envía al servidor.</p>
+<p class="privacy-note">El análisis de tus archivos ocurre en tu navegador. Solo si pedís las métricas de los mutuos se envían al servidor esos usernames y tu <code>sessionid</code> (no se guardan).</p>
 
 <div class="actions">
   <button id="compare-btn" disabled>Comparar</button>
-  <div class="spinner" id="spinner"></div>
+  <div class="spinner" id="spinner" role="status" aria-label="Procesando"></div>
 </div>
 
-<div class="error-msg" id="error-msg"></div>
+<div class="error-msg" id="error-msg" role="alert"></div>
 
 <div class="results" id="results">
   <div class="summary">
@@ -70,6 +71,14 @@
     </div>
   </div>
 
+  <section class="changes" id="changes" aria-labelledby="changes-title" hidden>
+    <div class="changes-head">
+      <h2 id="changes-title">Cambios desde <span id="changes-date"></span></h2>
+      <button class="copy-btn" id="forget-history" aria-label="Olvidar el historial de comparaciones">Olvidar historial</button>
+    </div>
+    <div class="changes-grid" id="changes-grid"></div>
+  </section>
+
   <div class="results-grid">
 
     <!-- Lista A: no te siguen de vuelta -->
@@ -78,13 +87,13 @@
         <h2>No te siguen de vuelta</h2>
         <div class="list-actions">
           <span class="badge" id="badge-a">0</span>
-          <button class="copy-btn" data-list="a">Copiar</button>
-          <button class="dl-btn"   data-list="a" data-filename="no_te_siguen.txt">Descargar</button>
-          <button class="dl-btn csv-btn" data-list="a" data-filename="no_te_siguen.csv">CSV</button>
+          <button class="copy-btn" data-list="a" aria-label="Copiar lista: no te siguen">Copiar</button>
+          <button class="dl-btn" aria-label="Descargar lista como texto: no te siguen" data-list="a" data-filename="no_te_siguen.txt">Descargar</button>
+          <button class="dl-btn csv-btn" aria-label="Descargar lista como CSV: no te siguen" data-list="a" data-filename="no_te_siguen.csv">CSV</button>
         </div>
       </div>
-      <input class="search-input" type="search" placeholder="Buscar…" data-filter="a" />
-      <div class="list-body" id="list-a"></div>
+      <input class="search-input" type="search" placeholder="Buscar…" aria-label="Buscar en no te siguen de vuelta" data-filter="a" />
+      <div class="list-body" id="list-a" tabindex="0" aria-label="Lista: no te siguen de vuelta"></div>
     </div>
 
     <!-- Lista B: no los seguís de vuelta -->
@@ -93,13 +102,13 @@
         <h2>No los seguís de vuelta</h2>
         <div class="list-actions">
           <span class="badge" id="badge-b">0</span>
-          <button class="copy-btn" data-list="b">Copiar</button>
-          <button class="dl-btn"   data-list="b" data-filename="no_los_seguis.txt">Descargar</button>
-          <button class="dl-btn csv-btn" data-list="b" data-filename="no_los_seguis.csv">CSV</button>
+          <button class="copy-btn" data-list="b" aria-label="Copiar lista: no los seguís">Copiar</button>
+          <button class="dl-btn" aria-label="Descargar lista como texto: no los seguís" data-list="b" data-filename="no_los_seguis.txt">Descargar</button>
+          <button class="dl-btn csv-btn" aria-label="Descargar lista como CSV: no los seguís" data-list="b" data-filename="no_los_seguis.csv">CSV</button>
         </div>
       </div>
-      <input class="search-input" type="search" placeholder="Buscar…" data-filter="b" />
-      <div class="list-body" id="list-b"></div>
+      <input class="search-input" type="search" placeholder="Buscar…" aria-label="Buscar en no los seguís de vuelta" data-filter="b" />
+      <div class="list-body" id="list-b" tabindex="0" aria-label="Lista: no los seguís de vuelta"></div>
     </div>
 
   </div>
@@ -111,9 +120,9 @@
       <div class="list-actions">
         <span class="badge" id="badge-mutual">0</span>
         <button class="sort-btn" id="sort-btn" disabled>↓ Más followers</button>
-        <button class="copy-btn" data-list="mutual">Copiar</button>
-        <button class="dl-btn"   data-list="mutual" data-filename="mutuos.txt">Descargar</button>
-          <button class="dl-btn csv-btn" data-list="mutual" data-filename="mutuos.csv">CSV</button>
+        <button class="copy-btn" data-list="mutual" aria-label="Copiar lista: mutuos">Copiar</button>
+        <button class="dl-btn" aria-label="Descargar lista como texto: mutuos" data-list="mutual" data-filename="mutuos.txt">Descargar</button>
+        <button class="dl-btn csv-btn" aria-label="Descargar lista como CSV: mutuos" data-list="mutual" data-filename="mutuos.csv">CSV</button>
       </div>
     </div>
 
@@ -121,34 +130,38 @@
     <div class="fetch-panel" id="fetch-panel">
       <div class="fetch-top">
         <span class="fetch-label">
-          <span class="fetch-dot" id="fetch-dot"></span>
-          <span id="fetch-status">Iniciando…</span>
+          <span class="fetch-dot" id="fetch-dot" aria-hidden="true"></span>
+          <span id="fetch-status" role="status" aria-live="polite">Iniciando…</span>
         </span>
-        <button class="stop-btn" id="stop-btn">Detener</button>
+        <span class="fetch-controls">
+          <button class="pause-btn" id="pause-btn">Pausar</button>
+          <button class="stop-btn" id="stop-btn">Detener</button>
+        </span>
       </div>
-      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-      <div class="fetch-eta" id="fetch-eta"></div>
-      <div id="fetch-last-error" style="font-size:.7rem;color:var(--accent2);margin-top:4px;display:none"></div>
+      <div class="progress-track" id="progress-track" role="progressbar" aria-label="Progreso de la consulta" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="fetch-eta" id="fetch-eta" aria-live="polite"></div>
+      <div id="fetch-last-error" role="alert" style="font-size:.7rem;color:var(--accent2);margin-top:4px;display:none"></div>
     </div>
 
     <!-- Fetch trigger -->
     <div id="fetch-trigger" style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px">
-      <span style="font-size:.78rem;color:var(--muted)">Ver cuántos seguidores tiene cada mútuo para decidir a quién dejar de seguir</span>
+      <span style="font-size:.78rem;color:var(--muted)" id="fetch-hint">Ver cuántos seguidores tiene cada mútuo para decidir a quién dejar de seguir.
+        <span class="warn">Consultar muchas cuentas seguidas puede hacer que Instagram limite o restrinja tu sesión: usalo con moderación.</span></span>
       <div style="display:flex;gap:6px;flex-shrink:0">
         <button class="login-btn-sm" id="session-btn" style="display:none"></button>
         <button class="fetch-btn" id="fetch-btn">Obtener followers</button>
       </div>
     </div>
 
-    <input class="search-input" type="search" id="search-mutual" placeholder="Buscar…" />
+    <input class="search-input" type="search" id="search-mutual" placeholder="Buscar…" aria-label="Buscar en mutuos" />
     <div class="mutual-sort-bar" id="mutual-sort-bar" style="display:none">
       <span class="sort-col">Usuario</span>
-      <span class="sort-col" data-sort="followers">Followers ↕</span>
-      <span class="sort-col" data-sort="following">Following ↕</span>
-      <span class="sort-col" data-sort="ratio">Ratio ↕</span>
-      <span class="sort-col" data-sort="posts">Posts ↕</span>
+      <span class="sort-col" data-sort="followers" role="button" tabindex="0">Followers ↕</span>
+      <span class="sort-col" data-sort="following" role="button" tabindex="0">Following ↕</span>
+      <span class="sort-col" data-sort="ratio" role="button" tabindex="0">Ratio ↕</span>
+      <span class="sort-col" data-sort="posts" role="button" tabindex="0">Posts ↕</span>
     </div>
-    <div class="list-body" id="list-mutual" style="max-height:500px"></div>
+    <div class="list-body" id="list-mutual" style="max-height:500px" tabindex="0" aria-label="Lista de mutuos"></div>
   </div>
 
   <button class="reset-btn" id="reset-btn">Resetear y comparar otros archivos</button>
@@ -156,8 +169,8 @@
 
 <!-- Login modal -->
 <div class="modal-overlay" id="modal-overlay">
-  <div class="modal">
-    <h2>Conectar Instagram</h2>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h2 id="modal-title">Conectar Instagram</h2>
     <p class="modal-sub">Necesitás pegar el cookie <code>sessionid</code> de tu navegador. Solo se usa para leer datos públicos — no se almacena tu contraseña.</p>
 
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:.79rem;color:var(--muted);line-height:1.7;margin-bottom:16px">
@@ -169,19 +182,22 @@
     </div>
 
     <div class="field">
-      <label>Valor del cookie <code>sessionid</code></label>
+      <label for="ig-sessionid">Valor del cookie <code>sessionid</code></label>
       <input type="text" id="ig-sessionid" autocomplete="off" placeholder="Pegá el valor aquí…" style="font-size:.78rem;font-family:monospace" />
     </div>
 
-    <div class="modal-error" id="modal-error"></div>
+    <div class="modal-error" id="modal-error" role="alert"></div>
     <div class="modal-actions">
       <button class="btn-secondary" id="modal-cancel">Cancelar</button>
       <button class="btn-primary"   id="modal-submit">Conectar</button>
     </div>
-    <p class="modal-privacy">El sessionid se guarda solo en tu máquina. Podés desconectarte en cualquier momento.</p>
+    <p class="modal-privacy">El sessionid se guarda solo en este navegador. Al consultar métricas se envía al servidor de esta app (quien la aloja podría verlo en tránsito), que lo usa en memoria y no lo almacena. Podés desconectarte en cualquier momento.</p>
   </div>
 </div>
 
+</main>
+
+<script src="{{ url_for('static', filename='lib.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

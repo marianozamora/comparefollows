@@ -1,0 +1,13 @@
+{
+  "name": "comparefollows",
+  "private": true,
+  "scripts": {
+    "lint": "eslint static tests eslint.config.js",
+    "test": "node --test \"tests/*.test.js\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "eslint": "^10.0.0",
+    "globals": "^15.0.0"
+  }
+}

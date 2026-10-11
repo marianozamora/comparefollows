@@ -5,6 +5,11 @@ let profileData = {};   // username → {followers, following, posts, verified} 
 let sortState   = { key: null, dir: -1 };   // dir: -1 desc, 1 asc
 let pollInterval     = null;
 let sessionUsername  = null;
+let currentJobId     = null;
+let fetchPaused      = false;
+let changes          = null;   // diff vs. la comparación anterior
+
+const SNAP_KEY = 'cf_snapshot';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -50,52 +55,7 @@ function setLoading(on) {
   document.getElementById('spinner').style.display = on ? 'block' : 'none';
 }
 
-function downloadList(listKey, filename) {
-  const blob = new Blob([lists[listKey].join('\n')], { type: 'text/plain' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ── File parser ───────────────────────────────────────────────────────────
-
-function parseContent(text, filename) {
-  const users = new Set();
-
-  if (filename.endsWith('.html') || text.includes('instagram.com')) {
-    let m = [...text.matchAll(/instagram\.com\/_u\/([A-Za-z0-9_.]+)/g)].map(x => x[1]);
-    if (!m.length)
-      m = [...text.matchAll(/instagram\.com\/([A-Za-z0-9_.][A-Za-z0-9_.]*)["'?]/g)].map(x => x[1]);
-    if (m.length) { m.forEach(u => users.add(u.toLowerCase())); return users; }
-  }
-
-  try {
-    const data = JSON.parse(text);
-    function extract(arr) {
-      if (!Array.isArray(arr)) return;
-      for (const item of arr) {
-        if (item && typeof item === 'object') {
-          for (const e of (item.string_list_data || []))
-            if (e.value) users.add(e.value.toLowerCase());
-          if (item.value) users.add(item.value.toLowerCase());
-        }
-      }
-    }
-    if (Array.isArray(data)) { extract(data); }
-    else if (data && typeof data === 'object') {
-      if (data.relationships_following) extract(data.relationships_following);
-      else for (const v of Object.values(data)) extract(v);
-    }
-    if (users.size) return users;
-  } catch (_) {}
-
-  for (const line of text.split('\n')) {
-    const t = line.trim().replace(/^@/, '');
-    if (t && !t.startsWith('#')) users.add(t.toLowerCase());
-  }
-  return users;
-}
+// ── File parser (parseContent vive en lib.js) ─────────────────────────────
 
 async function readFileList(fl) {
   const merged = new Set();
@@ -118,6 +78,8 @@ async function compare() {
       showError('No se pudieron leer los archivos. Verificá el formato.');
       return;
     }
+    updateChanges(followers, following);
+
     lists.a      = [...following].filter(u => !followers.has(u)).sort();
     lists.b      = [...followers].filter(u => !following.has(u)).sort();
     lists.mutual = [...following].filter(u =>  followers.has(u)).sort();
@@ -154,6 +116,62 @@ async function compare() {
   }
 }
 
+// ── Cambios desde la última comparación ───────────────────────────────────
+
+function readSnapshot() {
+  try { return JSON.parse(localStorage.getItem(SNAP_KEY)); } catch { return null; }
+}
+
+function updateChanges(followers, following) {
+  const cur  = { followers: [...followers].sort(), following: [...following].sort() };
+  const prev = readSnapshot();
+  changes = null;
+  if (prev && Array.isArray(prev.followers) && Array.isArray(prev.following)) {
+    const diff = diffSnapshots(prev, cur);
+    changes = { since: prev.date, ...diff };
+    if (Object.values(diff).every(a => !a.length)) return renderChanges();   // sin cambios: se conserva la fecha original
+  }
+  try { localStorage.setItem(SNAP_KEY, JSON.stringify({ date: new Date().toISOString(), ...cur })); } catch { /* almacenamiento lleno o bloqueado */ }
+  renderChanges();
+}
+
+function renderChanges() {
+  const box = document.getElementById('changes');
+  const grid = document.getElementById('changes-grid');
+  grid.replaceChildren();
+  if (!changes) { box.hidden = true; return; }
+  box.hidden = false;
+  document.getElementById('changes-date').textContent = new Date(changes.since).toLocaleDateString('es');
+
+  const cards = [
+    ['lostFollowers', 'Dejaron de seguirte', 'bad'],
+    ['newFollowers',  'Nuevos seguidores',   'good'],
+    ['unfollowed',    'Dejaste de seguir',   ''],
+    ['newFollowing',  'Empezaste a seguir',  ''],
+  ];
+  for (const [key, label, cls] of cards) {
+    const users = changes[key] || [];
+    const card = document.createElement('details');
+    card.className = `change-card ${cls}`;
+    const sum = document.createElement('summary');
+    const n = document.createElement('span'); n.className = 'n'; n.textContent = users.length;
+    sum.append(n, label);
+    card.append(sum);
+    if (users.length) {
+      const ul = document.createElement('ul');
+      for (const u of users) {
+        const li = document.createElement('li');
+        const a  = document.createElement('a');
+        a.href = `https://www.instagram.com/${u}`; a.target = '_blank'; a.rel = 'noopener';
+        a.textContent = u;
+        li.append(a); ul.append(li);
+      }
+      card.append(ul);
+    }
+    grid.append(card);
+  }
+}
+
 // ── Render ────────────────────────────────────────────────────────────────
 
 function renderList(containerId, items) {
@@ -164,7 +182,7 @@ function renderList(containerId, items) {
   }
   el.innerHTML = items.map(u => `
     <div class="list-item" data-name="${u}">
-      <div class="avatar">${u.charAt(0)}</div>
+      <div class="avatar" aria-hidden="true">${u.charAt(0)}</div>
       <span class="name"><a href="https://www.instagram.com/${u}" target="_blank" rel="noopener">${u}</a></span>
     </div>`).join('');
 }
@@ -184,7 +202,7 @@ function renderMutualList(items) {
     return `
       <div class="mutual-row" data-name="${u}">
         <div class="mutual-name">
-          <div class="avatar" style="background:rgba(76,175,125,.2);color:var(--green);width:24px;height:24px;font-size:.68rem;flex-shrink:0">${u.charAt(0)}</div>
+          <div class="avatar" aria-hidden="true" style="background:rgba(76,175,125,.2);color:var(--green);width:24px;height:24px;font-size:.68rem;flex-shrink:0">${u.charAt(0)}</div>
           <a href="https://www.instagram.com/${u}" target="_blank" rel="noopener">${u}</a>
           ${verifiedHtml}
         </div>
@@ -274,7 +292,10 @@ function updateSessionUI() {
   }
 }
 
+let modalOpener = null;
+
 function openModal() {
+  modalOpener = document.activeElement;
   document.getElementById('modal-overlay').classList.add('open');
   document.getElementById('ig-sessionid').focus();
   document.getElementById('modal-error').style.display = 'none';
@@ -287,6 +308,7 @@ function openModal() {
 
 function closeModal() {
   document.getElementById('modal-overlay').classList.remove('open');
+  if (modalOpener && modalOpener.focus) modalOpener.focus();
 }
 
 async function submitLogin() {
@@ -308,7 +330,7 @@ async function submitLogin() {
     updateSessionUI();
     closeModal();
     startFetch();
-  } catch (e) {
+  } catch {
     errEl.textContent = 'Error de conexión con el servidor.';
     errEl.style.display = 'block';
   } finally {
@@ -323,24 +345,46 @@ function logoutSession() {
   updateSessionUI();
 }
 
+function pendingMutuals() {
+  return lists.mutual.filter(u => !profileData[u]);
+}
+
+function updateFetchTrigger() {
+  const pending = pendingMutuals().length;
+  const done    = lists.mutual.length - pending;
+  document.getElementById('fetch-btn').textContent =
+    done > 0 && pending > 0 ? `Reanudar (${pending} pendientes)` : 'Obtener followers';
+}
+
+function setFetchUI(state, text) {
+  document.getElementById('fetch-dot').className = 'fetch-dot' + (state ? ' ' + state : '');
+  if (text !== undefined) document.getElementById('fetch-eta').textContent = text;
+}
+
 async function startFetch() {
   if (!lists.mutual.length) return;
 
   if (!sessionUsername) { openModal(); return; }
 
+  const pending = pendingMutuals();
+  if (!pending.length) { alert('Ya tenés los datos de todos los mutuos.'); return; }
+
   document.getElementById('fetch-trigger').style.display = 'none';
   document.getElementById('fetch-panel').classList.add('visible');
-  document.getElementById('fetch-dot').className = 'fetch-dot';
-  document.getElementById('progress-fill').style.width = '0%';
+  setFetchUI('', '');
+  setProgress(0);
+  fetchPaused = false;
+  document.getElementById('pause-btn').textContent = 'Pausar';
   document.getElementById('fetch-status').textContent = 'Iniciando…';
-  document.getElementById('fetch-eta').textContent = '';
+  document.getElementById('fetch-last-error').style.display = 'none';
   document.getElementById('stop-btn').disabled = false;
+  document.getElementById('pause-btn').disabled = false;
 
   try {
     const res = await fetch('/fetch-counts', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ usernames: lists.mutual, sessionid: getSavedSessionId() })
+      body: JSON.stringify({ usernames: pending, sessionid: getSavedSessionId() })
     });
     const data = await res.json();
     if (!res.ok) { alert(data.error); resetFetchUI(); return; }
@@ -352,53 +396,86 @@ async function startFetch() {
   }
 }
 
-let currentJobId = null;
-
 async function stopFetch() {
-  await fetch('/stop-fetch', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ job_id: currentJobId }) });
-  clearInterval(pollInterval); pollInterval = null;
-  document.getElementById('fetch-dot').className = 'fetch-dot stopped';
-  document.getElementById('fetch-eta').textContent = 'Proceso detenido.';
+  if (!currentJobId) return;
   document.getElementById('stop-btn').disabled = true;
+  document.getElementById('pause-btn').disabled = true;
+  await fetch('/stop-fetch', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ job_id: currentJobId }) });
+  await pollProgress();   // recoge lo que se alcanzó a procesar y cierra el estado
+}
+
+async function togglePause() {
+  if (!currentJobId) return;
+  fetchPaused = !fetchPaused;
+  await fetch('/pause-fetch', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ job_id: currentJobId, paused: fetchPaused }) });
+  document.getElementById('pause-btn').textContent = fetchPaused ? 'Reanudar' : 'Pausar';
+  setFetchUI(fetchPaused ? 'paused' : '', fetchPaused ? 'En pausa' : '');
 }
 
 function resetFetchUI() {
   document.getElementById('fetch-panel').classList.remove('visible');
   document.getElementById('fetch-trigger').style.display = '';
+  updateFetchTrigger();
+}
+
+function setProgress(pctDone) {
+  document.getElementById('progress-fill').style.width = pctDone + '%';
+  document.getElementById('progress-track').setAttribute('aria-valuenow', pctDone);
+}
+
+function finishFetch() {
+  clearInterval(pollInterval); pollInterval = null;
+  document.getElementById('stop-btn').disabled  = true;
+  document.getElementById('pause-btn').disabled = true;
+  if (Object.values(profileData).some(Boolean)) {
+    document.getElementById('sort-btn').disabled = false;
+    document.getElementById('mutual-sort-bar').style.display = '';
+    sortMutualBy('ratio');   // auto-orden por ratio al terminar
+  }
+  // si quedaron pendientes (detenido, fallidos) se ofrece reanudar
+  if (pendingMutuals().length) {
+    document.getElementById('fetch-trigger').style.display = '';
+    updateFetchTrigger();
+  }
 }
 
 async function pollProgress() {
   try {
-    const res  = await fetch('/fetch-progress?job_id=' + encodeURIComponent(currentJobId));
+    const res = await fetch('/fetch-progress?job_id=' + encodeURIComponent(currentJobId));
+    if (res.status === 404) {   // el servidor se reinició y perdió el job
+      setFetchUI('stopped', 'El servidor se reinició; lo ya obtenido se conserva. Podés reanudar.');
+      document.getElementById('fetch-status').textContent = 'Proceso interrumpido';
+      finishFetch();
+      return;
+    }
     const data = await res.json();
 
-    // Apply new results to mutual rows
+    // Aplicar resultados nuevos (un perfil ahora válido reemplaza un fallo previo)
     let changed = false;
     for (const [u, profile] of Object.entries(data.results)) {
-      if (!(u in profileData)) {
+      if (profile && !profileData[u]) {
         profileData[u] = profile;
         updateMutualRow(u, profile);
         changed = true;
+      } else if (!profile && !(u in profileData)) {
+        profileData[u] = null;
       }
     }
     if (changed) saveState();
 
-    const pctDone = data.total ? Math.round(data.done / data.total * 100) : 0;
-    document.getElementById('progress-fill').style.width = pctDone + '%';
+    setProgress(data.total ? Math.round(data.done / data.total * 100) : 0);
     document.getElementById('fetch-status').textContent = `${data.done} / ${data.total} usuarios`;
 
     // ETA
-    if (data.running && data.done > 0 && data.started_at) {
-      const elapsed  = (Date.now() - new Date(data.started_at)) / 1000;
-      const rate     = data.done / elapsed;
-      const remaining = Math.round((data.total - data.done) / rate);
+    if (data.running && !data.paused && data.done > 0 && data.started_at) {
+      const elapsed   = (Date.now() - new Date(data.started_at)) / 1000;
+      const remaining = Math.round((data.total - data.done) / (data.done / elapsed));
       const mins = Math.floor(remaining / 60);
       const secs = remaining % 60;
       document.getElementById('fetch-eta').textContent =
         remaining > 0 ? `~${mins > 0 ? mins + ' min ' : ''}${secs} seg restantes` : '';
     }
 
-    // Show last error detail
     const errDiv = document.getElementById('fetch-last-error');
     if (data.last_error) {
       errDiv.textContent = `Último error: ${data.last_error}`;
@@ -406,22 +483,13 @@ async function pollProgress() {
     }
 
     if (!data.running) {
-      clearInterval(pollInterval); pollInterval = null;
-      document.getElementById('fetch-dot').className = 'fetch-dot done';
-      document.getElementById('fetch-eta').textContent = data.error
-        ? `Error: ${data.error}`
-        : `Completado — ${Object.keys(data.results).length} cuentas procesadas`;
-      document.getElementById('stop-btn').disabled = true;
-      document.getElementById('sort-btn').disabled = false;
-      document.getElementById('mutual-sort-bar').style.display = '';
-      // Auto-sort by ratio desc once done
-      sortMutualBy('ratio');
+      const ok = Object.values(data.results).filter(Boolean).length;
+      if (data.stopped) setFetchUI('stopped', `Proceso detenido — ${ok} cuentas obtenidas.`);
+      else if (data.error) setFetchUI('done', `Error: ${data.error}`);
+      else setFetchUI('done', `Completado — ${ok} de ${data.total} cuentas obtenidas`);
+      finishFetch();
     }
-
-    if (data.error) {
-      clearInterval(pollInterval); pollInterval = null;
-    }
-  } catch (_) {}
+  } catch { /* error de red transitorio: el próximo poll reintenta */ }
 }
 
 // ── Drop zones ────────────────────────────────────────────────────────────
@@ -459,6 +527,13 @@ document.getElementById('compare-btn').addEventListener('click', compare);
 
 document.getElementById('fetch-btn').addEventListener('click', startFetch);
 document.getElementById('stop-btn').addEventListener('click', stopFetch);
+document.getElementById('pause-btn').addEventListener('click', togglePause);
+document.getElementById('forget-history').addEventListener('click', () => {
+  localStorage.removeItem(SNAP_KEY);
+  changes = null;
+  renderChanges();
+  saveState();
+});
 document.getElementById('sort-btn').addEventListener('click', sortMutual);
 
 document.getElementById('session-btn').addEventListener('click', () => {
@@ -484,10 +559,16 @@ document.getElementById('reset-btn').addEventListener('click', () => {
   });
   document.getElementById('compare-btn').disabled = true;
   document.getElementById('results').classList.remove('visible');
-  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+  if (pollInterval) {   // cortar el job en el servidor para no seguir consultando Instagram
+    clearInterval(pollInterval); pollInterval = null;
+    fetch('/stop-fetch', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ job_id: currentJobId }) }).catch(() => {});
+  }
   resetFetchUI();
   document.getElementById('stop-btn').disabled = false;
   showError('');
+  currentJobId = null;
+  changes = null;
+  renderChanges();
   clearState();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
@@ -512,6 +593,9 @@ document.getElementById('search-mutual').addEventListener('input', e => {
 // Column sort headers
 document.querySelectorAll('.sort-col[data-sort]').forEach(el => {
   el.addEventListener('click', () => sortMutualBy(el.dataset.sort));
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortMutualBy(el.dataset.sort); }
+  });
 });
 
 document.querySelectorAll('.copy-btn').forEach(btn => {
@@ -537,35 +621,23 @@ document.querySelectorAll('.dl-btn:not(.csv-btn)').forEach(btn => {
 
 // ── Export CSV ────────────────────────────────────────────────────────────
 
-  function csvCell(v) {
-    const s = v == null ? '' : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  }
-
-  document.querySelectorAll('.csv-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const key  = btn.dataset.list;
-      const rows = [['username', 'url', 'followers', 'following', 'posts', 'verified']];
-      for (const u of lists[key]) {
-        const p = profileData[u];
-        rows.push([u, `https://www.instagram.com/${u}/`,
-                   p ? p.followers : '', p ? p.following : '', p ? p.posts : '',
-                   p ? (p.verified ? 'si' : 'no') : '']);
-      }
-      const blob = new Blob(['\ufeff' + rows.map(r => r.map(csvCell).join(',')).join('\n')],
-                            { type: 'text/csv;charset=utf-8' });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = btn.dataset.filename; a.click();
-      URL.revokeObjectURL(url);
-    });
+document.querySelectorAll('.csv-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const blob = new Blob([buildCsv(lists[btn.dataset.list], profileData)],
+                          { type: 'text/csv;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = btn.dataset.filename; a.click();
+    URL.revokeObjectURL(url);
   });
+});
 
 // ── LocalStorage persistence ──────────────────────────────────────────────
 
 function saveState() {
   try {
     localStorage.setItem('cf_lists',       JSON.stringify(lists));
+    localStorage.setItem('cf_changes',     JSON.stringify(changes));
     localStorage.setItem('cf_profile',     JSON.stringify(profileData));
     localStorage.setItem('cf_stats',       JSON.stringify({
       followers: document.getElementById('count-followers').textContent,
@@ -576,7 +648,7 @@ function saveState() {
       pctA:      document.getElementById('pct-a').textContent,
       pctMutual: document.getElementById('pct-mutual').textContent,
     }));
-  } catch (_) {}
+  } catch { /* almacenamiento lleno o bloqueado */ }
 }
 
 function loadState() {
@@ -587,6 +659,8 @@ function loadState() {
     if (!savedLists) return;
 
     lists       = JSON.parse(savedLists);
+    changes     = JSON.parse(localStorage.getItem('cf_changes') || 'null');
+    renderChanges();
     profileData = savedProfile ? JSON.parse(savedProfile) : {};
 
     if (savedStats) {
@@ -613,14 +687,16 @@ function loadState() {
       sortMutualBy('ratio');
     }
 
+    updateFetchTrigger();
     document.getElementById('results').classList.add('visible');
-  } catch (_) {}
+  } catch { /* estado guardado corrupto: se ignora */ }
 }
 
 function clearState() {
   localStorage.removeItem('cf_lists');
   localStorage.removeItem('cf_profile');
   localStorage.removeItem('cf_stats');
+  localStorage.removeItem('cf_changes');   // el snapshot (cf_snapshot) se conserva para la próxima comparación
 }
 
 // Check session on load

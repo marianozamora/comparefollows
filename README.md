@@ -13,7 +13,9 @@ Herramienta local para analizar tus seguidores de Instagram. Compara tus listas 
 - **Copiar / descargar** cada lista como `.txt` o `.csv` (con métricas de los mutuos)
 - **Autoguardado** en `localStorage` — los resultados persisten al recargar
 - Soporte para **múltiples archivos** (Instagram divide los followers en varios archivos)
-- Todo el procesamiento de archivos ocurre en el navegador — ningún dato de tus listas se envía al servidor
+- El procesamiento de archivos ocurre en el navegador. Solo si pedís métricas de mutuos se envían al servidor esos usernames y tu `sessionid` (se usan en memoria, no se almacenan)
+- **Cambios desde la última comparación**: quién dejó de seguirte, nuevos seguidores, a quién dejaste de seguir y a quién empezaste a seguir (el historial vive en tu `localStorage`; hay botón para olvidarlo)
+- **Pausar / reanudar / detener** la consulta de métricas; si el servidor se reinicia, lo ya obtenido se conserva y podés reanudar
 
 ## Instalación
 
@@ -80,7 +82,28 @@ Ambos están en `.gitignore` — no se suben al repositorio.
 ## Producción y tests
 
 - En Railway (`RAILWAY_ENVIRONMENT`) o con `REQUIRE_AUTH=1`, la app **no arranca** sin `APP_USER` y `APP_PASSWORD`.
-- Hay rate limit por IP en `/compare`, `/validate-session` y `/fetch-counts`.
+- **Caché persistente:** montá un volumen en Railway; la app usa `$RAILWAY_VOLUME_MOUNT_PATH/follower_cache.db` automáticamente (o definí `CACHE_DB`). Sin volumen, la caché se pierde en cada deploy.
+- Hay rate limit por IP en `/validate-session` y `/fetch-counts`.
 - Usar un solo worker de gunicorn: el progreso de los jobs vive en memoria.
 - Ante un 429 de Instagram se aplica backoff exponencial (30 s → 8 min).
-- Tests: `pip install pytest && pytest`
+- **Privacidad del sessionid:** viaja al servidor de la app en cada consulta. Quien aloje la app podría verlo en tránsito (o en logs de infraestructura propios); la app no lo guarda ni lo registra. Desplegala solo si confiás en quien la opera.
+- Consultar muchas cuentas con una sesión real puede hacer que Instagram la limite; usalo con moderación.
+
+### Estructura
+
+| Archivo | Rol |
+|---------|-----|
+| `app.py` | Rutas Flask, Basic Auth |
+| `jobs.py` | Jobs en segundo plano (pausa, stop, backoff) |
+| `instagram.py` | Cliente de la API web de Instagram |
+| `cache.py` | Caché SQLite |
+| `ratelimit.py` | Rate limit por IP |
+| `static/lib.js` | Parser de exports, diff entre corridas, CSV (sin DOM) |
+| `static/app.js` | UI |
+
+### Tests
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt && pytest
+npm ci && npm run lint && npm test
+```

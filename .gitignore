@@ -16,3 +16,4 @@ venv/
 
 follower_cache.db
 follower_cache.db-journal
+node_modules/

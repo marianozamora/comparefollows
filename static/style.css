@@ -8,7 +8,7 @@
   --accent: #6c63ff;
   --accent2: #ff6584;
   --text: #e8e8e8;
-  --muted: #777;
+  --muted: #8c8c8c;
   --green: #4caf7d;
   --yellow: #f0c040;
   --radius: 12px;
@@ -403,3 +403,35 @@ header p { color: var(--muted); margin-top: 8px; font-size: 0.95rem; }
   opacity: .65;
   line-height: 1.45;
 }
+
+/* ── Accesibilidad ─────────────────────────────────────────────────────── */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop-zone:focus-within { border-color: var(--accent); background: rgba(108,99,255,.05); }
+.drop-zone input[type="file"]:focus-visible { outline: none; }
+.list-body:focus-visible { outline-offset: -2px; }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; scroll-behavior: auto !important; } }
+
+/* ── Pausa, aviso ──────────────────────────────────────────────────────── */
+.fetch-controls { display: flex; gap: 6px; }
+.pause-btn { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer; font-size: .72rem; padding: 4px 10px; }
+.pause-btn:hover { border-color: var(--yellow); color: var(--yellow); }
+.pause-btn:disabled { opacity: .4; cursor: default; }
+.fetch-dot.paused { background: var(--yellow); animation: none; }
+.warn { display: block; margin-top: 3px; color: var(--yellow); opacity: .85; }
+
+/* ── Cambios desde la última comparación ───────────────────────────────── */
+.changes { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
+.changes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.changes-head h2 { font-size: .95rem; font-weight: 600; }
+.changes-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+@media (max-width: 700px) { .changes-grid { grid-template-columns: 1fr 1fr; } }
+.change-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: .78rem; }
+.change-card summary { cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.change-card .n { font-size: 1.4rem; font-weight: 700; }
+.change-card.bad .n { color: var(--accent2); }
+.change-card.good .n { color: var(--green); }
+.change-card ul { list-style: none; margin-top: 8px; max-height: 160px; overflow-y: auto; }
+.change-card a { color: var(--text); text-decoration: none; }
+.change-card a:hover { text-decoration: underline; }
+.changes-empty { color: var(--muted); font-size: .8rem; }
